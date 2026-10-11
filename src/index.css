@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 220 20% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 239 84% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 14% 94%;
+  --secondary-foreground: 222 47% 20%;
+  --muted: 220 14% 95%;
+  --muted-foreground: 220 9% 42%;
+  --accent: 239 84% 96%;
+  --accent-foreground: 239 84% 45%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 142 64% 38%;
+  --success-foreground: 0 0% 100%;
+  --warning: 32 95% 48%;
+  --warning-foreground: 0 0% 100%;
+  --border: 220 13% 90%;
+  --input: 220 13% 88%;
+  --ring: 239 84% 60%;
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: 222 47% 7%;
+  --foreground: 213 31% 91%;
+  --card: 222 47% 10%;
+  --card-foreground: 213 31% 91%;
+  --popover: 222 47% 10%;
+  --popover-foreground: 213 31% 91%;
+  --primary: 239 84% 66%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 222 30% 16%;
+  --secondary-foreground: 213 31% 91%;
+  --muted: 222 30% 15%;
+  --muted-foreground: 218 11% 60%;
+  --accent: 239 60% 22%;
+  --accent-foreground: 234 100% 82%;
+  --destructive: 0 62% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 142 60% 42%;
+  --success-foreground: 0 0% 100%;
+  --warning: 32 90% 55%;
+  --warning-foreground: 0 0% 100%;
+  --border: 222 28% 17%;
+  --input: 222 28% 20%;
+  --ring: 239 84% 66%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/25 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer components {
+  .card-hover {
+    @apply transition-all duration-200 hover:shadow-lift hover:-translate-y-0.5;
+  }
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* Recharts polish */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+.recharts-cartesian-axis-tick text {
+  font-size: 11px;
+  fill: hsl(var(--muted-foreground));
+}
