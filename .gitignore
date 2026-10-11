@@ -1,0 +1,23 @@
+# Logs
+logs
+*.log
+
+# Env (không commit bí mật)
+.env
+.env.local
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
