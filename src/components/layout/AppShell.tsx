@@ -25,11 +25,6 @@ export function AppShell() {
       <QuickCreate />
       {openTaskId && <TaskDetailDrawer taskId={openTaskId} onClose={() => openTask(null)} />}
       <Toaster />
-      <div className="fixed bottom-3 left-3 z-40 hidden lg:block">
-        <span className="rounded-full border bg-card px-3 py-1 text-[11px] text-muted-foreground shadow-soft">
-          Chế độ demo — dữ liệu mẫu lưu trên trình duyệt
-        </span>
-      </div>
     </div>
   );
 }

@@ -70,7 +70,8 @@ export function ProjectsPage() {
     const q = query.trim().toLowerCase();
     const list = state.projects.filter((p) => {
       if (q && !`${p.name} ${p.code} ${p.description}`.toLowerCase().includes(q)) return false;
-      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+      // Mặc định ẩn dự án đã lưu trữ; chọn "Lưu trữ" trong bộ lọc để xem lại.
+      if (statusFilter === 'all' ? p.status === 'archived' : p.status !== statusFilter) return false;
       if (priorityFilter !== 'all' && p.priority !== priorityFilter) return false;
       if (managerFilter !== 'all' && p.managerId !== managerFilter) return false;
       return true;

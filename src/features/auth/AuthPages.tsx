@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Hexagon, Mail, Lock, User as UserIcon, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { getSupabase } from '../../lib/supabase';
 import { useApp } from '../../store/AppContext';
 import { Button } from '../../components/ui/button';
 import { Input, Field } from '../../components/ui/input';
@@ -40,24 +41,48 @@ function AuthShell({ title, subtitle, children }: { title: string; subtitle: str
   );
 }
 
+function friendlyAuthError(message: string): string {
+  if (/invalid login credentials/i.test(message)) return 'Email hoặc mật khẩu không đúng.';
+  if (/user already registered|already exists/i.test(message)) return 'Email này đã được đăng ký. Hãy đăng nhập.';
+  if (/email not confirmed/i.test(message)) return 'Email chưa được xác thực. Vui lòng kiểm tra hộp thư.';
+  if (/password/i.test(message)) return 'Mật khẩu chưa đạt yêu cầu.';
+  return message;
+}
+
 export function LoginPage() {
-  const { state, dispatch } = useApp();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('minhanh@nexus.vn');
-  const [password, setPassword] = useState('demo1234');
+  const { state } = useApp();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  const login = (userId: string) => {
-    dispatch({ type: 'AUTH_LOGIN', userId });
-    navigate('/');
-  };
+  if (state.authed && !state.loading) {
+    return <Navigate to="/" replace />;
+  }
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = state.users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (!user) { setError('Email chưa được đăng ký trong workspace demo.'); return; }
-    if (password.length < 4) { setError('Mật khẩu không đúng.'); return; }
-    login(user.id);
+    setError('');
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setError('Email không hợp lệ.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await getSupabase().auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) {
+        setError(friendlyAuthError(error.message));
+        return;
+      }
+      // Auth listener trong AppProvider sẽ nạp dữ liệu và chuyển vào app.
+      navigate('/', { replace: true });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -66,21 +91,20 @@ export function LoginPage() {
         <Field label="Email">
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ban@congty.vn" />
+            <Input className="pl-9" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ban@congty.vn" autoComplete="email" />
           </div>
         </Field>
         <Field label="Mật khẩu" error={error}>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+            <Input className="pl-9" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" />
           </div>
         </Field>
         <div className="flex justify-end">
           <Link to="/forgot-password" className="text-sm text-primary hover:underline">Quên mật khẩu?</Link>
         </div>
-        <Button type="submit" className="w-full" size="lg">Đăng nhập</Button>
-        <Button type="button" variant="outline" className="w-full" size="lg" onClick={() => login('u1')}>
-          Dùng tài khoản demo
+        <Button type="submit" className="w-full" size="lg" disabled={busy}>
+          {busy ? 'Đang đăng nhập...' : 'Đăng nhập'}
         </Button>
         <p className="text-center text-sm text-muted-foreground">
           Chưa có tài khoản? <Link to="/register" className="text-primary font-medium hover:underline">Đăng ký</Link>
@@ -91,21 +115,55 @@ export function LoginPage() {
 }
 
 export function RegisterPage() {
-  const { dispatch } = useApp();
   const navigate = useNavigate();
+  const { state } = useApp();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  if (state.authed && !state.loading) {
+    return <Navigate to="/" replace />;
+  }
+
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { setError('Vui lòng nhập họ tên.'); return; }
-    if (!/^\S+@\S+\.\S+$/.test(email)) { setError('Email không hợp lệ.'); return; }
-    if (password.length < 6) { setError('Mật khẩu phải có ít nhất 6 ký tự.'); return; }
-    dispatch({ type: 'USER_ADD', name: name.trim(), email: email.trim(), role: 'member' });
-    dispatch({ type: 'AUTH_LOGIN', userId: 'u1' });
-    navigate('/');
+    setError('');
+    if (!name.trim()) {
+      setError('Vui lòng nhập họ tên.');
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setError('Email không hợp lệ.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Mật khẩu phải có ít nhất 6 ký tự.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data, error } = await getSupabase().auth.signUp({
+        email: email.trim(),
+        password,
+        options: { data: { name: name.trim() } },
+      });
+      if (error) {
+        setError(friendlyAuthError(error.message));
+        return;
+      }
+      if (!data.session) {
+        // Trường hợp bật xác thực email: yêu cầu người dùng kiểm tra hộp thư.
+        setError('');
+        navigate('/login', { replace: true });
+        return;
+      }
+      // Đăng ký xong là có session ngay — auth listener sẽ tạo workspace và vào app.
+      navigate('/', { replace: true });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -114,22 +172,24 @@ export function RegisterPage() {
         <Field label="Họ tên">
           <div className="relative">
             <UserIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nguyễn Văn A" />
+            <Input className="pl-9" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nguyễn Văn A" autoComplete="name" />
           </div>
         </Field>
         <Field label="Email">
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ban@congty.vn" />
+            <Input className="pl-9" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ban@congty.vn" autoComplete="email" />
           </div>
         </Field>
         <Field label="Mật khẩu" error={error}>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Tối thiểu 6 ký tự" />
+            <Input className="pl-9" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Tối thiểu 6 ký tự" autoComplete="new-password" />
           </div>
         </Field>
-        <Button type="submit" className="w-full" size="lg">Đăng ký</Button>
+        <Button type="submit" className="w-full" size="lg" disabled={busy}>
+          {busy ? 'Đang tạo tài khoản...' : 'Đăng ký'}
+        </Button>
         <p className="text-center text-sm text-muted-foreground">
           Đã có tài khoản? <Link to="/login" className="text-primary font-medium hover:underline">Đăng nhập</Link>
         </p>
@@ -142,11 +202,27 @@ export function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!/^\S+@\S+\.\S+$/.test(email)) { setError('Email không hợp lệ.'); return; }
-    setSent(true);
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setError('Email không hợp lệ.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await getSupabase().auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/login`,
+      });
+      if (error) {
+        setError(friendlyAuthError(error.message));
+        return;
+      }
+      setSent(true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -165,10 +241,12 @@ export function ForgotPasswordPage() {
           <Field label="Email" error={error}>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-9" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ban@congty.vn" />
+              <Input className="pl-9" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ban@congty.vn" autoComplete="email" />
             </div>
           </Field>
-          <Button type="submit" className="w-full" size="lg">Gửi liên kết đặt lại</Button>
+          <Button type="submit" className="w-full" size="lg" disabled={busy}>
+            {busy ? 'Đang gửi...' : 'Gửi liên kết đặt lại'}
+          </Button>
           <Link to="/login" className="inline-flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Quay lại đăng nhập
           </Link>

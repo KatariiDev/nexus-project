@@ -21,7 +21,7 @@ const CRUMBS: Record<string, string> = {
 };
 
 export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () => void; onOpenQuickCreate: () => void }) {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, signOut } = useApp();
   const user = useCurrentUser();
   const location = useLocation();
   const navigate = useNavigate();
@@ -116,7 +116,7 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
           icon={<LogOut className="h-4 w-4" />}
           label="Đăng xuất"
           danger
-          onClick={() => { dispatch({ type: 'AUTH_LOGOUT' }); navigate('/login'); }}
+          onClick={() => { void signOut(); navigate('/login'); }}
         />
       </Dropdown>
     </header>

@@ -6,7 +6,7 @@ import { Checkbox } from '../../components/ui/controls';
 import { Avatar } from '../../components/ui/avatar';
 import { toast } from '../../components/ui/toast';
 import { useApp } from '../../store/AppContext';
-import { genId, cn } from '../../lib/utils';
+import { newId, cn } from '../../lib/utils';
 import { addDaysISO, toISODate } from '../../lib/format';
 import { PROJECT_STATUSES, PRIORITIES } from '../../types';
 import type { Priority, Project, ProjectStatus } from '../../types';
@@ -116,7 +116,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
   const handleSubmit = () => {
     if (!validate()) return;
     const project: Project = {
-      id: initial?.id ?? genId('p'),
+      id: initial?.id ?? newId(),
       code: form.code.trim().toUpperCase(),
       name: form.name.trim(),
       description: form.description.trim(),

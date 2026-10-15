@@ -7,7 +7,8 @@ import { Button } from '../ui/button';
 import { Input, Textarea, Select, Field } from '../ui/input';
 import { Tabs } from '../ui/tabs';
 import { toast } from '../ui/toast';
-import { genId } from '../../lib/utils';
+import { newId } from '../../lib/utils';
+import { nextTaskCode } from '../../features/tasks/helpers';
 import { toISODate } from '../../lib/format';
 import { PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, WORKSPACE_ROLES, type Priority, type ProjectStatus, type TaskStatus, type WorkspaceRole } from '../../types';
 
@@ -34,7 +35,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
     dispatch({
       type: 'PROJECT_ADD',
       project: {
-        id: genId('p'), code: f.values.code.trim().toUpperCase(), name: f.values.name.trim(),
+        id: newId(), code: f.values.code.trim().toUpperCase(), name: f.values.name.trim(),
         description: f.values.description.trim(), status: f.values.status as ProjectStatus,
         priority: f.values.priority as Priority, startDate: f.values.startDate || toISODate(new Date()),
         endDate: f.values.endDate || toISODate(new Date()),
@@ -76,20 +77,22 @@ function TaskQuickForm({ onDone }: { onDone: () => void }) {
     if (!f.values.title.trim()) { f.setErrors({ title: 'Vui lòng nhập tiêu đề nhiệm vụ' }); return; }
     const project = state.projects.find((p) => p.id === f.values.projectId);
     if (!project) return;
-    const count = state.tasks.filter((t) => t.projectId === project.id).length + 1;
-    dispatch({
+    const projectTasks = state.tasks.filter((t) => t.projectId === project.id);
+    const code = nextTaskCode(project.code, projectTasks);
+    void dispatch({
       type: 'TASK_ADD',
       task: {
-        id: genId('t'), code: `${project.code}-${String(count).padStart(2, '0')}`,
+        id: newId(), code,
         title: f.values.title.trim(), description: '', projectId: project.id,
         status: f.values.status as TaskStatus, priority: f.values.priority as Priority,
         assigneeIds: [f.values.assigneeId], creatorId: me.id, watcherIds: [],
         dueDate: f.values.dueDate ? new Date(f.values.dueDate).toISOString() : undefined,
         labelIds: [], createdAt: toISODate(new Date()), updatedAt: toISODate(new Date()),
       },
+    }).then(() => {
+      toast('Tạo nhiệm vụ thành công', f.values.title.trim());
+      f.reset(); onDone();
     });
-    toast('Tạo nhiệm vụ thành công', f.values.title.trim());
-    f.reset(); onDone();
   };
 
   return (
@@ -111,24 +114,25 @@ function TaskQuickForm({ onDone }: { onDone: () => void }) {
 
 function MemberQuickForm({ onDone }: { onDone: () => void }) {
   const { dispatch } = useApp();
-  const f = useForm({ name: '', email: '', role: 'member' as string });
+  const f = useForm({ email: '', role: 'member' as string });
 
   const submit = () => {
     const errs: Record<string, string> = {};
-    if (!f.values.name.trim()) errs.name = 'Vui lòng nhập họ tên';
     if (!/^\S+@\S+\.\S+$/.test(f.values.email)) errs.email = 'Email không hợp lệ';
     if (Object.keys(errs).length) { f.setErrors(errs); return; }
-    dispatch({ type: 'USER_ADD', name: f.values.name.trim(), email: f.values.email.trim(), role: f.values.role as WorkspaceRole });
-    toast('Đã gửi lời mời', `Lời mời đã được gửi đến ${f.values.email.trim()}`);
-    f.reset(); onDone();
+    void dispatch({ type: 'USER_ADD', email: f.values.email.trim(), role: f.values.role as WorkspaceRole })
+      .then(() => {
+        toast('Đã thêm thành viên', f.values.email.trim());
+        f.reset(); onDone();
+      });
   };
 
   return (
     <div className="flex flex-col gap-4">
-      <Field label="Họ tên" error={f.errors.name}><Input value={f.values.name} onChange={(e) => f.set('name', e.target.value)} placeholder="VD: Nguyễn Văn A" /></Field>
       <Field label="Email" error={f.errors.email}><Input value={f.values.email} onChange={(e) => f.set('email', e.target.value)} placeholder="email@congty.vn" /></Field>
+      <p className="-mt-2 text-xs text-muted-foreground">Người này phải đã đăng ký tài khoản Nexus trước.</p>
       <Field label="Vai trò"><Select value={f.values.role} onChange={(e) => f.set('role', e.target.value)}>{WORKSPACE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label} — {r.desc}</option>)}</Select></Field>
-      <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>Gửi lời mời</Button></DialogFooter>
+      <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>Thêm thành viên</Button></DialogFooter>
     </div>
   );
 }

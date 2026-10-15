@@ -1,10 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Hexagon } from 'lucide-react';
 import { useApp } from './store/AppContext';
 import { AppShell } from './components/layout/AppShell';
 import { LoginPage, RegisterPage, ForgotPasswordPage } from './features/auth/AuthPages';
 import { DashboardPage } from './features/dashboard/DashboardPage';
 import { ProjectsPage, ProjectDetailPage } from './features/projects/ProjectsPage';
-import { MyTasksPage } from './features/tasks/TasksPage';
+import { MyTasksPage, TasksPage } from './features/tasks/TasksPage';
 import { CalendarPage } from './features/calendar/CalendarPage';
 import { GanttPage } from './features/timeline/GanttPage';
 import { TeamPage } from './features/team/TeamPage';
@@ -16,6 +17,37 @@ import { SettingsPage } from './features/settings/SettingsPage';
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { state } = useApp();
   const location = useLocation();
+
+  if (state.loading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+          <Hexagon className="h-8 w-8 animate-pulse" />
+        </span>
+        <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
+      </div>
+    );
+  }
+
+  if (state.configError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-6 text-center">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+          <Hexagon className="h-8 w-8" />
+        </span>
+        <div>
+          <h1 className="text-xl font-bold">Chưa cấu hình Supabase</h1>
+          <p className="mt-2 max-w-md text-sm text-muted-foreground">
+            Tạo file <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">.env</code> từ{' '}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">.env.example</code> và điền{' '}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">VITE_SUPABASE_URL</code> cùng{' '}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">VITE_SUPABASE_ANON_KEY</code> rồi chạy lại ứng dụng.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!state.authed) return <Navigate to="/login" state={{ from: location }} replace />;
   return <>{children}</>;
 }
@@ -38,6 +70,7 @@ export default function App() {
           <Route index element={<DashboardPage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="projects/:id" element={<ProjectDetailPage />} />
+          <Route path="tasks" element={<TasksPage />} />
           <Route path="my-tasks" element={<MyTasksPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="timeline" element={<GanttPage />} />
