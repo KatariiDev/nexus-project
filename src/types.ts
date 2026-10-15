@@ -98,7 +98,7 @@ export interface TaskAttachment {
 export interface Notification {
   id: string;
   userId: string;
-  kind: 'assigned' | 'due_soon' | 'overdue' | 'comment' | 'project' | 'member';
+  kind: 'assigned' | 'due_soon' | 'overdue' | 'comment' | 'project' | 'member' | 'review';
   title: string;
   body: string;
   link?: string;
