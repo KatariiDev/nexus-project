@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Bell, Database, Moon, Sun, User, AlertTriangle, Check } from 'lucide-react';
+import { Bell, Database, Moon, Sun, User, Check } from 'lucide-react';
 import { useApp, useCurrentUser } from '../../store/AppContext';
-import { PageHeader, ConfirmDialog } from '../../components/ui/feedback';
+import { PageHeader } from '../../components/ui/feedback';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input, Select, Field } from '../../components/ui/input';
@@ -11,14 +11,13 @@ import { Avatar } from '../../components/ui/avatar';
 import { toast } from '../../components/ui/toast';
 import { cn } from '../../lib/utils';
 
-type TabKey = 'profile' | 'appearance' | 'notifications' | 'workspace' | 'data';
+type TabKey = 'profile' | 'appearance' | 'notifications' | 'workspace';
 
 const TABS: { value: TabKey; label: string; icon: React.ReactNode }[] = [
   { value: 'profile', label: 'Hồ sơ', icon: <User className="h-4 w-4" /> },
   { value: 'appearance', label: 'Giao diện', icon: <Sun className="h-4 w-4" /> },
   { value: 'notifications', label: 'Thông báo', icon: <Bell className="h-4 w-4" /> },
   { value: 'workspace', label: 'Workspace', icon: <Database className="h-4 w-4" /> },
-  { value: 'data', label: 'Dữ liệu', icon: <AlertTriangle className="h-4 w-4" /> },
 ];
 
 const TIMEZONES = [
@@ -71,7 +70,6 @@ export function SettingsPage() {
   const [wsError, setWsError] = useState('');
 
   const [prefs, setPrefs] = useState<NotifPrefs>(loadPrefs);
-  const [confirmReset, setConfirmReset] = useState(false);
 
   function saveProfile() {
     const n = name.trim();
@@ -89,8 +87,9 @@ export function SettingsPage() {
       setWsError('Vui lòng nhập tên workspace.');
       return;
     }
-    dispatch({ type: 'WORKSPACE_UPDATE', name: n, timezone: wsTz });
-    toast('Đã cập nhật workspace', `Workspace "${n}" đã được lưu.`);
+    void dispatch({ type: 'WORKSPACE_UPDATE', name: n, timezone: wsTz }).then(() => {
+      toast('Đã cập nhật workspace', `Workspace "${n}" đã được lưu.`);
+    });
   }
 
   function togglePref(key: keyof NotifPrefs, v: boolean) {
@@ -101,14 +100,6 @@ export function SettingsPage() {
     } catch {
       /* ignore */
     }
-  }
-
-  function handleReset() {
-    dispatch({ type: 'RESET_DEMO' });
-    setConfirmReset(false);
-    setWsName(state.workspace.name);
-    setWsTz(state.workspace.timezone);
-    toast('Đã khôi phục dữ liệu demo', 'Mọi thay đổi đã được đưa về trạng thái ban đầu.');
   }
 
   return (
@@ -256,40 +247,6 @@ export function SettingsPage() {
         </Card>
       )}
 
-      {tab === 'data' && (
-        <Card className="max-w-2xl">
-          <CardHeader>
-            <CardTitle>Dữ liệu</CardTitle>
-            <CardDescription>Quản lý dữ liệu demo của ứng dụng.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-              <div className="text-sm">
-                <p className="font-semibold">Khôi phục dữ liệu demo</p>
-                <p className="mt-1 text-muted-foreground">
-                  Tất cả dự án, nhiệm vụ, tài liệu và thay đổi của bạn sẽ bị mất. Dữ liệu mẫu ban đầu sẽ được khôi phục.
-                </p>
-              </div>
-            </div>
-            <div>
-              <Button variant="destructive" onClick={() => setConfirmReset(true)}>
-                Khôi phục dữ liệu demo
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">Chế độ demo: dữ liệu được lưu trên trình duyệt của bạn.</p>
-          </CardContent>
-        </Card>
-      )}
-
-      <ConfirmDialog
-        open={confirmReset}
-        title="Khôi phục dữ liệu demo?"
-        desc="Toàn bộ thay đổi của bạn (dự án, nhiệm vụ, tài liệu, thành viên…) sẽ bị mất và không thể hoàn tác. Bạn có chắc muốn tiếp tục?"
-        confirmLabel="Khôi phục"
-        onConfirm={handleReset}
-        onCancel={() => setConfirmReset(false)}
-      />
     </div>
   );
 }

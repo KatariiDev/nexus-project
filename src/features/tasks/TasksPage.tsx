@@ -19,7 +19,7 @@ import { Progress } from '../../components/ui/progress';
 import { ConfirmDialog, EmptyState, PageHeader } from '../../components/ui/feedback';
 import { toast } from '../../components/ui/toast';
 import { dueLabel, isOverdue } from '../../lib/format';
-import { cn, genId } from '../../lib/utils';
+import { cn, newId } from '../../lib/utils';
 import { nextTaskCode } from './helpers';
 import { TaskForm } from './TaskForm';
 
@@ -115,7 +115,7 @@ function QuickAdd({ status, projectId }: { status: TaskStatus; projectId?: strin
     if (!title) return;
     const now = new Date().toISOString();
     const task: Task = {
-      id: genId('t'),
+      id: newId(),
       code: nextTaskCode(project.code, state.tasks),
       title,
       description: '',

@@ -11,7 +11,7 @@ import { Field, Input, Select, Textarea } from '../../components/ui/input';
 import { Checkbox } from '../../components/ui/controls';
 import { Avatar } from '../../components/ui/avatar';
 import { toast } from '../../components/ui/toast';
-import { genId } from '../../lib/utils';
+import { newId } from '../../lib/utils';
 import { dateInputToISO, isoToDateInput, nextTaskCode } from './helpers';
 
 const formSchema = z.object({
@@ -98,7 +98,7 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
       toast('Đã cập nhật nhiệm vụ', title);
     } else {
       const task: Task = {
-        id: genId('t'),
+        id: newId(),
         code: nextTaskCode(project.code, state.tasks),
         title,
         description,

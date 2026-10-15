@@ -11,6 +11,11 @@ export function genId(prefix = 'id'): string {
   return `${prefix}_${Date.now().toString(36)}_${idCounter.toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** ID cho entity lưu trên Supabase — uuid chuẩn, dùng làm khóa chính. */
+export function newId(): string {
+  return crypto.randomUUID();
+}
+
 export function initials(name: string): string {
   return name
     .split(' ')

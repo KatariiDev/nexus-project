@@ -17,7 +17,7 @@ import { Progress } from '../../components/ui/progress';
 import { ConfirmDialog } from '../../components/ui/feedback';
 import { toast } from '../../components/ui/toast';
 import { dueLabel, timeAgo } from '../../lib/format';
-import { cn } from '../../lib/utils';
+import { cn, newId } from '../../lib/utils';
 import { dateInputToISO, isoToDateInput } from './helpers';
 
 const dueToneClass: Record<string, string> = {
@@ -138,21 +138,21 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
   const addChecklist = () => {
     const v = checklistTitle.trim();
     if (!v) return;
-    dispatch({ type: 'CHECKLIST_ADD', taskId: task.id, title: v });
+    dispatch({ type: 'CHECKLIST_ADD', id: newId(), taskId: task.id, title: v });
     setChecklistTitle('');
   };
 
   const submitComment = () => {
     const body = commentBody.trim();
     if (!body) return;
-    dispatch({ type: 'COMMENT_ADD', taskId: task.id, body });
+    dispatch({ type: 'COMMENT_ADD', id: newId(), taskId: task.id, body });
     setCommentBody('');
     toast('Đã gửi bình luận');
   };
 
   const addDependency = (dependsOnId: string) => {
     if (!dependsOnId) return;
-    dispatch({ type: 'DEPENDENCY_ADD', taskId: task.id, dependsOnId });
+    dispatch({ type: 'DEPENDENCY_ADD', id: newId(), taskId: task.id, dependsOnId });
     const name = taskById(state.tasks, dependsOnId)?.title ?? '';
     toast('Đã thêm nhiệm vụ phụ thuộc', name);
     setDepValue('');

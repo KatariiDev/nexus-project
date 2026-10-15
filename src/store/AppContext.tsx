@@ -1,18 +1,64 @@
-import React, { createContext, useContext, useEffect, useMemo, useReducer } from 'react';
-import type { SeedData } from '../data/seed';
-import { buildSeed } from '../data/seed';
-import type { ActivityLog, Notification, Project, Task } from '../types';
-import { genId } from '../lib/utils';
+/**
+ * Store trung tâm của Nexus Project.
+ *
+ * Kiến trúc: mọi thao tác của người dùng đi qua `dispatch` — bất đồng bộ.
+ * 1. `persistAction` (lib/db.ts) ghi thay đổi xuống Supabase trước.
+ * 2. Nếu thành công, reducer cập nhật state cục bộ để UI phản hồi ngay.
+ * 3. Nếu thất bại, state giữ nguyên và UI báo lỗi.
+ *
+ * Nhờ đó components không cần biết gì về Supabase: chúng chỉ dispatch
+ * action như trước, còn việc đồng bộ DB do lớp này đảm nhiệm.
+ */
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
+import {
+  bootstrapWorkspace,
+  fetchMyMemberships,
+  loadWorkspaceData,
+  persistAction,
+  type PersistContext,
+  type WorkspaceBundle,
+} from '../lib/db';
+import { toast } from '../components/ui/toast';
+import type {
+  ActivityLog,
+  ChecklistItem,
+  Document,
+  Label,
+  Notification,
+  Project,
+  Task,
+  TaskAttachment,
+  TaskComment,
+  TaskDependency,
+  User,
+  Workspace,
+  WorkspaceRole,
+} from '../types';
 
-export interface AppState extends SeedData {
+export interface AppState {
   authed: boolean;
+  loading: boolean;
+  configError: boolean;
+  workspace: Workspace;
+  users: User[];
+  currentUserId: string;
+  labels: Label[];
+  projects: Project[];
+  tasks: Task[];
+  checklists: ChecklistItem[];
+  comments: TaskComment[];
+  dependencies: TaskDependency[];
+  attachments: TaskAttachment[];
+  notifications: Notification[];
+  activityLogs: ActivityLog[];
+  documents: Document[];
   theme: 'light' | 'dark';
   sidebarCollapsed: boolean;
 }
 
-type Action =
-  | { type: 'AUTH_LOGIN'; userId: string }
-  | { type: 'AUTH_LOGOUT' }
+/** Action do components dispatch (public API của store). */
+export type Action =
   | { type: 'SET_THEME'; theme: 'light' | 'dark' }
   | { type: 'TOGGLE_SIDEBAR' }
   | { type: 'PROJECT_ADD'; project: Project }
@@ -23,55 +69,103 @@ type Action =
   | { type: 'TASK_DELETE'; id: string }
   | { type: 'TASK_MOVE'; id: string; status: Task['status'] }
   | { type: 'CHECKLIST_TOGGLE'; id: string }
-  | { type: 'CHECKLIST_ADD'; taskId: string; title: string }
+  | { type: 'CHECKLIST_ADD'; id: string; taskId: string; title: string }
   | { type: 'CHECKLIST_DELETE'; id: string }
-  | { type: 'COMMENT_ADD'; taskId: string; body: string }
+  | { type: 'COMMENT_ADD'; id: string; taskId: string; body: string }
   | { type: 'COMMENT_DELETE'; id: string }
-  | { type: 'DEPENDENCY_ADD'; taskId: string; dependsOnId: string }
+  | { type: 'DEPENDENCY_ADD'; id: string; taskId: string; dependsOnId: string }
   | { type: 'DEPENDENCY_DELETE'; id: string }
   | { type: 'NOTIF_READ'; id: string }
   | { type: 'NOTIF_READ_ALL' }
-  | { type: 'NOTIF_ADD'; notification: Notification }
-  | { type: 'USER_ADD'; name: string; email: string; role: SeedData['users'][number]['role'] }
-  | { type: 'USER_UPDATE_ROLE'; id: string; role: SeedData['users'][number]['role'] }
+  | { type: 'USER_ADD'; email: string; role: WorkspaceRole }
+  | { type: 'USER_UPDATE_ROLE'; id: string; role: WorkspaceRole }
   | { type: 'USER_UPDATE_PROFILE'; id: string; name: string; title: string }
   | { type: 'WORKSPACE_UPDATE'; name: string; timezone: string }
   | { type: 'DOC_ADD'; title: string; content: string; projectId?: string }
   | { type: 'DOC_UPDATE'; id: string; title: string; content: string }
-  | { type: 'DOC_DELETE'; id: string }
-  | { type: 'RESET_DEMO' };
+  | { type: 'DOC_DELETE'; id: string };
 
-const STORAGE_KEY = 'nexus-state-v1';
+/**
+ * Action nội bộ: gồm Action đã được `persistAction` làm giàu
+ * (kèm log/user/doc/task đã ghi xuống DB) + các action vòng đời session.
+ */
+export type RichAction =
+  | (Action & { log?: ActivityLog; user?: User; doc?: Document; task?: Task })
+  | { type: 'HYDRATE'; bundle: WorkspaceBundle; userId: string }
+  | { type: 'SESSION_END' }
+  | { type: 'BOOT_DONE' }
+  | { type: 'BOOT_CONFIG_ERROR' };
 
-function initState(): AppState {
+const THEME_KEY = 'nexus-theme';
+const SIDEBAR_KEY = 'nexus-sidebar-collapsed';
+const WORKSPACE_KEY = 'nexus-workspace-id';
+
+function readTheme(): 'light' | 'dark' {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as AppState;
-      if (parsed && parsed.projects && parsed.tasks) return parsed;
-    }
+    return (localStorage.getItem(THEME_KEY) as 'light' | 'dark' | null) ?? 'light';
   } catch {
-    /* ignore */
+    return 'light';
   }
-  return { ...buildSeed(), authed: false, theme: 'light', sidebarCollapsed: false };
 }
 
-function pushActivity(state: AppState, entry: Omit<ActivityLog, 'id' | 'createdAt' | 'actorId'>): ActivityLog[] {
-  const log: ActivityLog = {
-    ...entry,
-    id: genId('ac'),
-    actorId: state.currentUserId,
-    createdAt: new Date().toISOString(),
+function emptyState(): AppState {
+  let sidebarCollapsed = false;
+  try {
+    sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === '1';
+  } catch { /* ignore */ }
+  return {
+    authed: false,
+    loading: true,
+    configError: false,
+    workspace: { id: '', name: '', timezone: 'Asia/Ho_Chi_Minh' },
+    users: [],
+    currentUserId: '',
+    labels: [],
+    projects: [],
+    tasks: [],
+    checklists: [],
+    comments: [],
+    dependencies: [],
+    attachments: [],
+    notifications: [],
+    activityLogs: [],
+    documents: [],
+    theme: readTheme(),
+    sidebarCollapsed,
   };
-  return [log, ...state.activityLogs].slice(0, 200);
 }
 
-function reducer(state: AppState, action: Action): AppState {
+function withLog(logs: ActivityLog[], log?: ActivityLog): ActivityLog[] {
+  return log ? [log, ...logs].slice(0, 200) : logs;
+}
+
+function reducer(state: AppState, action: RichAction): AppState {
   switch (action.type) {
-    case 'AUTH_LOGIN':
-      return { ...state, authed: true, currentUserId: action.userId };
-    case 'AUTH_LOGOUT':
-      return { ...state, authed: false };
+    case 'HYDRATE':
+      return {
+        ...state,
+        authed: true,
+        loading: false,
+        workspace: action.bundle.workspace,
+        users: action.bundle.users,
+        currentUserId: action.userId,
+        labels: action.bundle.labels,
+        projects: action.bundle.projects,
+        tasks: action.bundle.tasks,
+        checklists: action.bundle.checklists,
+        comments: action.bundle.comments,
+        dependencies: action.bundle.dependencies,
+        attachments: action.bundle.attachments,
+        notifications: action.bundle.notifications,
+        activityLogs: action.bundle.activityLogs,
+        documents: action.bundle.documents,
+      };
+    case 'SESSION_END':
+      return { ...emptyState(), loading: false, theme: state.theme };
+    case 'BOOT_DONE':
+      return { ...state, loading: false };
+    case 'BOOT_CONFIG_ERROR':
+      return { ...state, loading: false, configError: true };
     case 'SET_THEME':
       return { ...state, theme: action.theme };
     case 'TOGGLE_SIDEBAR':
@@ -80,13 +174,14 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         projects: [action.project, ...state.projects],
-        activityLogs: pushActivity(state, { action: 'đã tạo', entityType: 'project', entityId: action.project.id, entityName: action.project.name }),
+        activityLogs: withLog(state.activityLogs, action.log),
       };
     case 'PROJECT_UPDATE':
       return {
         ...state,
-        projects: state.projects.map((p) => (p.id === action.project.id ? { ...action.project, updatedAt: new Date().toISOString() } : p)),
-        activityLogs: pushActivity(state, { action: 'đã cập nhật', entityType: 'project', entityId: action.project.id, entityName: action.project.name }),
+        projects: state.projects.map((p) =>
+          p.id === action.project.id ? { ...action.project, updatedAt: new Date().toISOString() } : p),
+        activityLogs: withLog(state.activityLogs, action.log),
       };
     case 'PROJECT_DELETE':
       return { ...state, projects: state.projects.filter((p) => p.id !== action.id) };
@@ -94,20 +189,14 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         tasks: [action.task, ...state.tasks],
-        activityLogs: pushActivity(state, { action: 'đã tạo', entityType: 'task', entityId: action.task.id, entityName: action.task.title }),
+        activityLogs: withLog(state.activityLogs, action.log),
       };
     case 'TASK_UPDATE': {
-      const prev = state.tasks.find((t) => t.id === action.task.id);
-      const moved = prev && prev.status !== action.task.status;
+      const task = action.task;
       return {
         ...state,
-        tasks: state.tasks.map((t) => (t.id === action.task.id ? { ...action.task, updatedAt: new Date().toISOString() } : t)),
-        activityLogs: pushActivity(state, {
-          action: moved ? 'đã chuyển trạng thái' : 'đã cập nhật',
-          entityType: 'task',
-          entityId: action.task.id,
-          entityName: action.task.title,
-        }),
+        tasks: state.tasks.map((t) => (t.id === task.id ? { ...task, updatedAt: new Date().toISOString() } : t)),
+        activityLogs: withLog(state.activityLogs, action.log),
       };
     }
     case 'TASK_DELETE':
@@ -130,32 +219,36 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         tasks: state.tasks.map((t) => (t.id === action.id ? updated : t)),
-        activityLogs: pushActivity(state, { action: 'đã chuyển trạng thái', entityType: 'task', entityId: task.id, entityName: task.title }),
+        activityLogs: withLog(state.activityLogs, action.log),
       };
     }
     case 'CHECKLIST_TOGGLE':
       return { ...state, checklists: state.checklists.map((c) => (c.id === action.id ? { ...c, done: !c.done } : c)) };
     case 'CHECKLIST_ADD':
-      return { ...state, checklists: [...state.checklists, { id: genId('c'), taskId: action.taskId, title: action.title, done: false }] };
+      return {
+        ...state,
+        checklists: [...state.checklists, { id: action.id, taskId: action.taskId, title: action.title, done: false }],
+      };
     case 'CHECKLIST_DELETE':
       return { ...state, checklists: state.checklists.filter((c) => c.id !== action.id) };
     case 'COMMENT_ADD':
       return {
         ...state,
-        comments: [...state.comments, { id: genId('cm'), taskId: action.taskId, authorId: state.currentUserId, body: action.body, createdAt: new Date().toISOString() }],
-        activityLogs: pushActivity(state, {
-          action: 'đã bình luận trong',
-          entityType: 'task',
-          entityId: action.taskId,
-          entityName: state.tasks.find((t) => t.id === action.taskId)?.title ?? '',
-        }),
+        comments: [
+          ...state.comments,
+          { id: action.id, taskId: action.taskId, authorId: state.currentUserId, body: action.body, createdAt: new Date().toISOString() },
+        ],
+        activityLogs: withLog(state.activityLogs, action.log),
       };
     case 'COMMENT_DELETE':
       return { ...state, comments: state.comments.filter((c) => c.id !== action.id) };
     case 'DEPENDENCY_ADD': {
       const exists = state.dependencies.some((d) => d.taskId === action.taskId && d.dependsOnId === action.dependsOnId);
       if (exists || action.taskId === action.dependsOnId) return state;
-      return { ...state, dependencies: [...state.dependencies, { id: genId('dep'), taskId: action.taskId, dependsOnId: action.dependsOnId }] };
+      return {
+        ...state,
+        dependencies: [...state.dependencies, { id: action.id, taskId: action.taskId, dependsOnId: action.dependsOnId }],
+      };
     }
     case 'DEPENDENCY_DELETE':
       return { ...state, dependencies: state.dependencies.filter((d) => d.id !== action.id) };
@@ -163,13 +256,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, notifications: state.notifications.map((n) => (n.id === action.id ? { ...n, read: true } : n)) };
     case 'NOTIF_READ_ALL':
       return { ...state, notifications: state.notifications.map((n) => ({ ...n, read: true })) };
-    case 'NOTIF_ADD':
-      return { ...state, notifications: [action.notification, ...state.notifications] };
     case 'USER_ADD':
-      return {
-        ...state,
-        users: [...state.users, { id: genId('u'), name: action.name, email: action.email, title: 'Thành viên', role: action.role, status: 'invited' as const, workload: 0 }],
-      };
+      return action.user ? { ...state, users: [...state.users, action.user] } : state;
     case 'USER_UPDATE_ROLE':
       return { ...state, users: state.users.map((u) => (u.id === action.id ? { ...u, role: action.role } : u)) };
     case 'USER_UPDATE_PROFILE':
@@ -177,41 +265,143 @@ function reducer(state: AppState, action: Action): AppState {
     case 'WORKSPACE_UPDATE':
       return { ...state, workspace: { ...state.workspace, name: action.name, timezone: action.timezone } };
     case 'DOC_ADD':
+      return action.doc ? { ...state, documents: [action.doc, ...state.documents] } : state;
+    case 'DOC_UPDATE':
       return {
         ...state,
-        documents: [{ id: genId('doc'), title: action.title, content: action.content, projectId: action.projectId, authorId: state.currentUserId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...state.documents],
+        documents: state.documents.map((x) =>
+          x.id === action.id ? { ...x, title: action.title, content: action.content, updatedAt: new Date().toISOString() } : x),
       };
-    case 'DOC_UPDATE':
-      return { ...state, documents: state.documents.map((x) => (x.id === action.id ? { ...x, title: action.title, content: action.content, updatedAt: new Date().toISOString() } : x)) };
     case 'DOC_DELETE':
       return { ...state, documents: state.documents.filter((x) => x.id !== action.id) };
-    case 'RESET_DEMO': {
-      const seed = buildSeed();
-      return { ...seed, authed: state.authed, theme: state.theme, sidebarCollapsed: state.sidebarCollapsed };
-    }
     default:
       return state;
   }
 }
 
-const AppContext = createContext<{ state: AppState; dispatch: React.Dispatch<Action> } | null>(null);
+interface AppContextValue {
+  state: AppState;
+  dispatch: (action: Action) => Promise<void>;
+  signOut: () => Promise<void>;
+}
+
+const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, undefined, initState);
+  const [state, baseDispatch] = useReducer(reducer, undefined, emptyState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const ctxRef = useRef<PersistContext | null>(null);
+  const loadedRef = useRef(false);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      /* ignore */
+  /** Nạp workspace đang hoạt động cho user (tự bootstrap nếu là tài khoản mới). */
+  const loadForUser = useCallback(async (userId: string, userName: string) => {
+    const sb = getSupabase();
+    let memberships = await fetchMyMemberships(sb, userId);
+    if (memberships.length === 0) {
+      await bootstrapWorkspace(sb);
+      memberships = await fetchMyMemberships(sb, userId);
+      if (memberships.length === 0) throw new Error('Không tạo được workspace cho tài khoản mới.');
     }
-  }, [state]);
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(WORKSPACE_KEY);
+    } catch { /* ignore */ }
+    const active = memberships.find((m) => m.workspaceId === saved) ?? memberships[0];
+    ctxRef.current = { workspaceId: active.workspaceId, userId, userName };
+    const bundle = await loadWorkspaceData(sb, userId, active.workspaceId);
+    try {
+      localStorage.setItem(WORKSPACE_KEY, active.workspaceId);
+    } catch { /* ignore */ }
+    baseDispatch({ type: 'HYDRATE', bundle, userId });
+  }, []);
 
+  // Khởi tạo session + lắng nghe thay đổi auth
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      baseDispatch({ type: 'BOOT_CONFIG_ERROR' });
+      return;
+    }
+    const sb = getSupabase();
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { data: { session }, error } = await sb.auth.getSession();
+        if (error) throw error;
+        if (cancelled) return;
+        if (!session) {
+          baseDispatch({ type: 'BOOT_DONE' });
+          return;
+        }
+        loadedRef.current = true;
+        await loadForUser(session.user.id, session.user.user_metadata?.name ?? session.user.email ?? 'Thành viên');
+      } catch (e) {
+        console.error('Không tải được dữ liệu:', e);
+        if (!cancelled) baseDispatch({ type: 'BOOT_DONE' });
+      }
+    })();
+
+    const { data: { subscription } } = sb.auth.onAuthStateChange(async (event, session) => {
+      if (cancelled) return;
+      if (event === 'SIGNED_OUT') {
+        loadedRef.current = false;
+        ctxRef.current = null;
+        baseDispatch({ type: 'SESSION_END' });
+      } else if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && !loadedRef.current) {
+        loadedRef.current = true;
+        try {
+          await loadForUser(session.user.id, session.user.user_metadata?.name ?? session.user.email ?? 'Thành viên');
+        } catch (e) {
+          console.error('Không tải được dữ liệu:', e);
+          baseDispatch({ type: 'BOOT_DONE' });
+        }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [loadForUser]);
+
+  // Theme + sidebar: áp class dark và lưu localStorage
   useEffect(() => {
     document.documentElement.classList.toggle('dark', state.theme === 'dark');
-  }, [state.theme]);
+    try {
+      localStorage.setItem(THEME_KEY, state.theme);
+      localStorage.setItem(SIDEBAR_KEY, state.sidebarCollapsed ? '1' : '0');
+    } catch { /* ignore */ }
+  }, [state.theme, state.sidebarCollapsed]);
 
-  const value = useMemo(() => ({ state, dispatch }), [state]);
+  const dispatch = useCallback(async (action: Action) => {
+    // SET_THEME / TOGGLE_SIDEBAR chỉ là trạng thái giao diện cục bộ
+    if (action.type === 'SET_THEME' || action.type === 'TOGGLE_SIDEBAR') {
+      baseDispatch(action);
+      return;
+    }
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    try {
+      const enriched = await persistAction(getSupabase(), ctx, stateRef.current, action);
+      baseDispatch(enriched);
+    } catch (e) {
+      toast('Không thể lưu thay đổi', e instanceof Error ? e.message : 'Đã xảy ra lỗi.', 'error');
+    }
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try {
+      await getSupabase().auth.signOut();
+    } catch {
+      /* auth listener sẽ dọn state qua SESSION_END */
+    }
+  }, []);
+
+  const value = useMemo(
+    () => ({ state, dispatch, signOut }),
+    [state, dispatch, signOut],
+  );
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
@@ -221,12 +411,21 @@ export function useApp() {
   return ctx;
 }
 
-export function useCurrentUser() {
+export function useCurrentUser(): User {
   const { state } = useApp();
-  return state.users.find((u) => u.id === state.currentUserId)!;
+  return (
+    state.users.find((u) => u.id === state.currentUserId) ?? {
+      id: state.currentUserId,
+      name: '—',
+      email: '',
+      title: '',
+      role: 'member',
+      status: 'active',
+    }
+  );
 }
 
-/* ---------- selectors ---------- */
+/* ---------- selectors (giữ nguyên để components không phải sửa) ---------- */
 export function projectTasks(tasks: Task[], projectId: string): Task[] {
   return tasks.filter((t) => t.projectId === projectId);
 }
@@ -242,7 +441,7 @@ export function taskById(tasks: Task[], id?: string | null): Task | undefined {
   return tasks.find((t) => t.id === id);
 }
 
-export function userById(users: AppState['users'], id: string) {
+export function userById(users: User[], id: string) {
   return users.find((u) => u.id === id);
 }
 
