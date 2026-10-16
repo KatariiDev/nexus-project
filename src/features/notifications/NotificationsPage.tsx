@@ -19,6 +19,7 @@ const kindMeta: Record<Notification['kind'], { icon: React.ReactNode; tone: stri
   comment: { icon: <MessageSquare className="h-4 w-4" />, tone: 'bg-sky-500/10 text-sky-600 dark:text-sky-400', label: 'Bình luận' },
   project: { icon: <Briefcase className="h-4 w-4" />, tone: 'bg-success/10 text-success', label: 'Dự án' },
   member: { icon: <Users className="h-4 w-4" />, tone: 'bg-purple-500/10 text-purple-600 dark:text-purple-400', label: 'Thành viên' },
+  review: { icon: <CheckCheck className="h-4 w-4" />, tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', label: 'Chờ duyệt' },
 };
 
 export function NotificationsPage() {

@@ -374,6 +374,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch { /* ignore */ }
   }, [state.theme, state.sidebarCollapsed]);
 
+/**
+ * Quy tắc duyệt nhiệm vụ: task đang ở trạng thái "Chờ duyệt" (in_review)
+ * thì chỉ Owner/Admin mới được chuyển sang trạng thái khác
+ * (duyệt → "Hoàn thành", hoặc trả về "Đang thực hiện"/"Cần thực hiện").
+ * Thành viên thường vẫn được đưa task vào "Chờ duyệt" (gửi yêu cầu duyệt).
+ * Ném Error để dispatch hiện toast và giữ nguyên trạng thái.
+ */
+function assertApprovalPermission(state: AppState, action: Action): void {
+  if (action.type !== 'TASK_MOVE' && action.type !== 'TASK_UPDATE') return;
+  const taskId = action.type === 'TASK_MOVE' ? action.id : action.task.id;
+  const nextStatus = action.type === 'TASK_MOVE' ? action.status : action.task.status;
+  const prev = state.tasks.find((t) => t.id === taskId);
+  if (!prev || prev.status !== 'in_review' || nextStatus === 'in_review') return;
+  const me = state.users.find((u) => u.id === state.currentUserId);
+  if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
+    throw new Error('Nhiệm vụ đang chờ duyệt — chỉ Owner/Admin mới được duyệt hoặc trả về.');
+  }
+}
+
   const dispatch = useCallback(async (action: Action) => {
     // SET_THEME / TOGGLE_SIDEBAR chỉ là trạng thái giao diện cục bộ
     if (action.type === 'SET_THEME' || action.type === 'TOGGLE_SIDEBAR') {
@@ -383,6 +402,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const ctx = ctxRef.current;
     if (!ctx) return;
     try {
+      assertApprovalPermission(stateRef.current, action);
       const enriched = await persistAction(getSupabase(), ctx, stateRef.current, action);
       baseDispatch(enriched);
     } catch (e) {

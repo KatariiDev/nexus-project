@@ -416,6 +416,41 @@ async function notifyAssignees(
   if (error) throw error;
 }
 
+/**
+ * Thông báo quy trình duyệt nhiệm vụ:
+ * - requested: có người gửi yêu cầu duyệt (→ in_review) → báo cho Owner/Admin.
+ * - approved: admin duyệt (in_review → done) → báo cho người thực hiện.
+ * - rejected: admin trả về (in_review → trạng thái khác) → báo cho người thực hiện.
+ */
+async function notifyReview(
+  sb: Sb,
+  ctx: PersistContext,
+  users: User[],
+  task: Task,
+  event: 'requested' | 'approved' | 'rejected',
+): Promise<void> {
+  const targets =
+    event === 'requested'
+      ? users.filter((u) => (u.role === 'owner' || u.role === 'admin') && u.id !== ctx.userId).map((u) => u.id)
+      : task.assigneeIds.filter((id) => id !== ctx.userId);
+  if (targets.length === 0) return;
+  const meta = {
+    requested: { title: 'Có nhiệm vụ chờ duyệt', body: `${ctx.userName} đã gửi "${task.title}" chờ duyệt.` },
+    approved: { title: 'Nhiệm vụ đã được duyệt', body: `"${task.title}" đã được ${ctx.userName} duyệt.` },
+    rejected: { title: 'Nhiệm vụ bị trả về', body: `"${task.title}" đã bị ${ctx.userName} trả về.` },
+  }[event];
+  const rows = targets.map((userId) => ({
+    id: newId(),
+    user_id: userId,
+    kind: 'review',
+    title: meta.title,
+    body: meta.body,
+    link: `/tasks/${task.id}`,
+  }));
+  const { error } = await sb.from('notifications').insert(rows);
+  if (error) throw error;
+}
+
 function toProjectRow(p: Project, workspaceId: string) {
   return {
     id: p.id,
@@ -533,17 +568,35 @@ export async function persistAction(
         const added = task.assigneeIds.filter((id) => !prev.assigneeIds.includes(id));
         await notifyAssignees(sb, ctx, task, added);
       }
+      if (statusChanged) {
+        const wasReview = prev?.status === 'in_review';
+        if (!wasReview && task.status === 'in_review') {
+          await notifyReview(sb, ctx, state.users, task, 'requested');
+        } else if (wasReview && task.status === 'done') {
+          await notifyReview(sb, ctx, state.users, task, 'approved');
+        } else if (wasReview) {
+          await notifyReview(sb, ctx, state.users, task, 'rejected');
+        }
+      }
       return { ...action, task, log };
     }
 
     case 'TASK_MOVE': {
       const task = state.tasks.find((t) => t.id === action.id);
       if (!task) return action;
+      const wasReview = task.status === 'in_review';
       const completedAt = action.status === 'done' ? new Date().toISOString() : null;
       const { error } = await sb.from('tasks').update({ status: action.status, completed_at: completedAt }).eq('id', action.id);
       if (error) throwDb(error, 'Không chuyển trạng thái được.');
       const log = buildLog(ctx, 'đã chuyển trạng thái', 'task', task.id, task.title);
       await insertLog(sb, ctx, log);
+      if (!wasReview && action.status === 'in_review') {
+        await notifyReview(sb, ctx, state.users, task, 'requested');
+      } else if (wasReview && action.status === 'done') {
+        await notifyReview(sb, ctx, state.users, task, 'approved');
+      } else if (wasReview) {
+        await notifyReview(sb, ctx, state.users, task, 'rejected');
+      }
       return { ...action, log };
     }
 
