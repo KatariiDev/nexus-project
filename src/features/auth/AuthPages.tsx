@@ -58,7 +58,7 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   if (state.authed && !state.loading) {
-    return <Navigate to="/user" replace />;
+    return <Navigate to="/" replace />;
   }
 
   const submit = async (e: React.FormEvent) => {
@@ -79,7 +79,7 @@ export function LoginPage() {
         return;
       }
       // Auth listener trong AppProvider sẽ nạp dữ liệu và chuyển vào app.
-      navigate('/user', { replace: true });
+      navigate('/', { replace: true });
     } finally {
       setBusy(false);
     }
@@ -125,7 +125,7 @@ export function RegisterPage() {
   const [busy, setBusy] = useState(false);
 
   if (state.authed && !state.loading) {
-    return <Navigate to="/user" replace />;
+    return <Navigate to="/" replace />;
   }
 
   const submit = async (e: React.FormEvent) => {
@@ -165,7 +165,7 @@ export function RegisterPage() {
         return;
       }
       // Đăng ký xong là có session ngay — auth listener sẽ tạo workspace và vào app.
-      navigate('/user', { replace: true });
+      navigate('/', { replace: true });
     } finally {
       setBusy(false);
     }
