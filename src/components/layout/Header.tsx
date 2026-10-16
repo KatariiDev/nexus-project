@@ -34,7 +34,7 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
   return (
     <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-card px-4 sm:px-6">
       <nav className="flex items-center gap-1.5 text-sm">
-        <Link to="/" className="text-muted-foreground hover:text-foreground">Nexus</Link>
+        <Link to="/user" className="text-muted-foreground hover:text-foreground">Nexus</Link>
         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-semibold">{crumb}</span>
       </nav>
@@ -90,7 +90,7 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
           </button>
         ))}
         <DropdownSeparator />
-        <DropdownItem label="Xem tất cả thông báo" onClick={() => navigate('/notifications')} />
+        <DropdownItem label="Xem tất cả thông báo" onClick={() => navigate('/user/notifications')} />
       </Dropdown>
 
       <button
@@ -109,8 +109,8 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
           <p className="text-xs text-muted-foreground">{user.email}</p>
         </div>
         <DropdownSeparator />
-        <DropdownItem icon={<UserIcon className="h-4 w-4" />} label="Hồ sơ cá nhân" onClick={() => navigate('/settings')} />
-        <DropdownItem icon={<SettingsIcon className="h-4 w-4" />} label="Cài đặt" onClick={() => navigate('/settings')} />
+        <DropdownItem icon={<UserIcon className="h-4 w-4" />} label="Hồ sơ cá nhân" onClick={() => navigate('/user/settings')} />
+        <DropdownItem icon={<SettingsIcon className="h-4 w-4" />} label="Cài đặt" onClick={() => navigate('/user/settings')} />
         <DropdownSeparator />
         <DropdownItem
           icon={<LogOut className="h-4 w-4" />}

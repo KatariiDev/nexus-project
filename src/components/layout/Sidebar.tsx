@@ -2,23 +2,24 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Briefcase, KanbanSquare, ListChecks, CalendarDays, Milestone,
   Users, FileText, BarChart3, Bell, Settings, ChevronsLeft, ChevronsRight, Hexagon,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useApp, useCurrentUser } from '../../store/AppContext';
 import { Avatar } from '../ui/avatar';
 
 export const NAV_ITEMS = [
-  { to: '/', label: 'Tổng quan', icon: LayoutDashboard, end: true },
-  { to: '/projects', label: 'Dự án', icon: Briefcase },
-  { to: '/tasks', label: 'Nhiệm vụ', icon: KanbanSquare },
-  { to: '/my-tasks', label: 'Công việc của tôi', icon: ListChecks },
-  { to: '/calendar', label: 'Lịch', icon: CalendarDays },
-  { to: '/timeline', label: 'Timeline', icon: Milestone },
-  { to: '/team', label: 'Nhóm & Nhân sự', icon: Users },
-  { to: '/documents', label: 'Tài liệu', icon: FileText },
-  { to: '/reports', label: 'Báo cáo', icon: BarChart3 },
-  { to: '/notifications', label: 'Thông báo', icon: Bell },
-  { to: '/settings', label: 'Cài đặt', icon: Settings },
+  { to: '/user', label: 'Tổng quan', icon: LayoutDashboard, end: true },
+  { to: '/user/projects', label: 'Dự án', icon: Briefcase },
+  { to: '/user/tasks', label: 'Nhiệm vụ', icon: KanbanSquare },
+  { to: '/user/my-tasks', label: 'Công việc của tôi', icon: ListChecks },
+  { to: '/user/calendar', label: 'Lịch', icon: CalendarDays },
+  { to: '/user/timeline', label: 'Timeline', icon: Milestone },
+  { to: '/user/team', label: 'Nhóm & Nhân sự', icon: Users },
+  { to: '/user/documents', label: 'Tài liệu', icon: FileText },
+  { to: '/user/reports', label: 'Báo cáo', icon: BarChart3 },
+  { to: '/user/notifications', label: 'Thông báo', icon: Bell },
+  { to: '/user/settings', label: 'Cài đặt', icon: Settings },
 ];
 
 export function Sidebar() {
@@ -26,6 +27,8 @@ export function Sidebar() {
   const user = useCurrentUser();
   const collapsed = state.sidebarCollapsed;
   const unread = state.notifications.filter((n) => n.userId === state.currentUserId && !n.read).length;
+  const isAdmin = user.role === 'owner' || user.role === 'admin';
+  const pendingCount = state.projectRequests.filter((r) => r.status === 'pending').length;
 
   return (
     <aside
@@ -66,7 +69,7 @@ export function Sidebar() {
               >
                 <item.icon className="h-[18px] w-[18px] shrink-0" />
                 {!collapsed && <span className="truncate">{item.label}</span>}
-                {!collapsed && item.to === '/notifications' && unread > 0 && (
+                {!collapsed && item.to === '/user/notifications' && unread > 0 && (
                   <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[11px] font-semibold text-white">
                     {unread}
                   </span>
@@ -74,6 +77,31 @@ export function Sidebar() {
               </NavLink>
             </li>
           ))}
+          {isAdmin && (
+            <li className="mt-2 border-t pt-2">
+              <NavLink
+                to="/admin/overview"
+                title={collapsed ? 'Trang quản trị' : undefined}
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                    collapsed && 'justify-center px-0',
+                    isActive
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                  )
+                }
+              >
+                <ShieldCheck className="h-[18px] w-[18px] shrink-0" />
+                {!collapsed && <span className="truncate">Trang quản trị</span>}
+                {!collapsed && pendingCount > 0 && (
+                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[11px] font-semibold text-white">
+                    {pendingCount}
+                  </span>
+                )}
+              </NavLink>
+            </li>
+          )}
         </ul>
       </nav>
 

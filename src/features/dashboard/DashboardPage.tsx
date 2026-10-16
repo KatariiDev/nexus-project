@@ -238,7 +238,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle>Dự án gần đây</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/projects')}>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/user/projects')}>
               Xem tất cả <ArrowRight className="h-4 w-4" />
             </Button>
           </CardHeader>
@@ -273,7 +273,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle>Sắp đến hạn</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/my-tasks')}>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/user/my-tasks')}>
               Công việc của tôi <ArrowRight className="h-4 w-4" />
             </Button>
           </CardHeader>

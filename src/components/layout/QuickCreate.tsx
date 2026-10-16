@@ -25,6 +25,8 @@ function useForm<T extends Record<string, string>>(initial: T) {
 
 function ProjectQuickForm({ onDone }: { onDone: () => void }) {
   const { state, dispatch } = useApp();
+  const me = useCurrentUser();
+  const isAdmin = me.role === 'owner' || me.role === 'admin';
   const f = useForm({ name: '', code: '', description: '', status: 'planning' as string, priority: 'medium' as string, managerId: state.currentUserId, startDate: '', endDate: '' });
 
   const submit = () => {
@@ -32,18 +34,42 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
     if (!f.values.name.trim()) errs.name = 'Vui lòng nhập tên dự án';
     if (!f.values.code.trim()) errs.code = 'Vui lòng nhập mã dự án';
     if (Object.keys(errs).length) { f.setErrors(errs); return; }
-    dispatch({
-      type: 'PROJECT_ADD',
-      project: {
-        id: newId(), code: f.values.code.trim().toUpperCase(), name: f.values.name.trim(),
-        description: f.values.description.trim(), status: f.values.status as ProjectStatus,
-        priority: f.values.priority as Priority, startDate: f.values.startDate || toISODate(new Date()),
-        endDate: f.values.endDate || toISODate(new Date()),
-        managerId: f.values.managerId, memberIds: [f.values.managerId],
-        color: '#4F46E5', createdAt: toISODate(new Date()), updatedAt: toISODate(new Date()),
-      },
-    });
-    toast('Tạo dự án thành công', f.values.name.trim());
+    const payload = {
+      code: f.values.code.trim().toUpperCase(),
+      name: f.values.name.trim(),
+      description: f.values.description.trim(),
+      priority: f.values.priority as Priority,
+      startDate: f.values.startDate || toISODate(new Date()),
+      endDate: f.values.endDate || toISODate(new Date()),
+      managerId: f.values.managerId,
+      memberIds: [f.values.managerId],
+      color: '#4F46E5',
+    };
+    if (isAdmin) {
+      dispatch({
+        type: 'PROJECT_ADD',
+        project: {
+          id: newId(), status: f.values.status as ProjectStatus,
+          createdAt: toISODate(new Date()), updatedAt: toISODate(new Date()),
+          ...payload,
+        },
+      });
+      toast('Tạo dự án thành công', f.values.name.trim());
+    } else {
+      dispatch({
+        type: 'PROJECT_REQUEST_CREATE',
+        request: {
+          id: newId(),
+          workspaceId: state.workspace.id,
+          type: 'create_project',
+          payload,
+          status: 'pending',
+          requestedBy: state.currentUserId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      toast('Đã gửi yêu cầu tạo dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
+    }
     f.reset(); onDone();
   };
 
@@ -63,7 +89,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
         <Field label="Bắt đầu"><Input type="date" value={f.values.startDate} onChange={(e) => f.set('startDate', e.target.value)} /></Field>
         <Field label="Kết thúc"><Input type="date" value={f.values.endDate} onChange={(e) => f.set('endDate', e.target.value)} /></Field>
       </div>
-      <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>Tạo dự án</Button></DialogFooter>
+      <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>{isAdmin ? 'Tạo dự án' : 'Gửi yêu cầu'}</Button></DialogFooter>
     </div>
   );
 }
@@ -146,7 +172,7 @@ function DocQuickForm({ onDone }: { onDone: () => void }) {
     if (!f.values.title.trim()) { f.setErrors({ title: 'Vui lòng nhập tiêu đề tài liệu' }); return; }
     dispatch({ type: 'DOC_ADD', title: f.values.title.trim(), content: f.values.content.trim(), projectId: f.values.projectId || undefined });
     toast('Tạo tài liệu thành công', f.values.title.trim());
-    f.reset(); onDone(); navigate('/documents');
+    f.reset(); onDone(); navigate('/user/documents');
   };
 
   return (

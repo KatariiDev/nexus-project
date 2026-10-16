@@ -13,6 +13,7 @@ import { DocumentsPage } from './features/documents/DocumentsPage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { NotificationsPage } from './features/notifications/NotificationsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
+import { AdminShell, AdminOverviewPage, ApprovalsPage, AdminLogsPage, RequireAdmin } from './features/admin/AdminPages';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { state } = useApp();
@@ -52,6 +53,21 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Các đường dẫn cũ (trước khi chuyển sang /user/*) tự chuyển sang vị trí mới. */
+const LEGACY_PREFIXES = [
+  'projects', 'tasks', 'my-tasks', 'calendar', 'timeline',
+  'team', 'documents', 'reports', 'notifications', 'settings',
+];
+
+function Fallback() {
+  const loc = useLocation();
+  const seg = loc.pathname.split('/')[1] ?? '';
+  if (LEGACY_PREFIXES.includes(seg)) {
+    return <Navigate to={`/user${loc.pathname}${loc.search}`} replace />;
+  }
+  return <Navigate to="/user" replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -59,8 +75,10 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+
+        {/* Khu vực người dùng */}
         <Route
-          path="/"
+          path="/user/*"
           element={
             <RequireAuth>
               <AppShell />
@@ -80,7 +98,28 @@ export default function App() {
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+
+        {/* Khu vực quản trị — chỉ Owner/Admin */}
+        <Route
+          path="/admin/*"
+          element={
+            <RequireAuth>
+              <RequireAdmin>
+                <AdminShell />
+              </RequireAdmin>
+            </RequireAuth>
+          }
+        >
+          <Route index element={<Navigate to="overview" replace />} />
+          <Route path="overview" element={<AdminOverviewPage />} />
+          <Route path="approvals" element={<ApprovalsPage />} />
+          <Route path="users" element={<TeamPage />} />
+          <Route path="projects" element={<ProjectsPage />} />
+          <Route path="logs" element={<AdminLogsPage />} />
+        </Route>
+
+        <Route path="/" element={<Navigate to="/user" replace />} />
+        <Route path="*" element={<Fallback />} />
       </Routes>
     </BrowserRouter>
   );
