@@ -6,6 +6,7 @@ import { Checkbox } from '../../components/ui/controls';
 import { Avatar } from '../../components/ui/avatar';
 import { toast } from '../../components/ui/toast';
 import { useApp, useCurrentUser } from '../../store/AppContext';
+import { canDirectProjectAction } from '../../lib/roles';
 import { newId, cn } from '../../lib/utils';
 import { addDaysISO, toISODate } from '../../lib/format';
 import { PROJECT_STATUSES, PRIORITIES } from '../../types';
@@ -42,7 +43,7 @@ function toInputDate(iso: string): string {
 export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
-  const isAdmin = me.role === 'owner' || me.role === 'admin';
+  const canDirect = canDirectProjectAction(me.role);
   const [form, setForm] = useState<FormState | null>(null);
   const [errors, setErrors] = useState<Errors>({});
 
@@ -137,11 +138,11 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
     if (initial) {
       dispatch({ type: 'PROJECT_UPDATE', project });
       toast('Đã cập nhật dự án', project.name);
-    } else if (isAdmin) {
+    } else if (canDirect) {
       dispatch({ type: 'PROJECT_ADD', project });
       toast('Đã tạo dự án', `${project.code} · ${project.name}`);
     } else {
-      // Thành viên thường: gửi yêu cầu để Owner/Admin phê duyệt.
+      // Owner: gửi yêu cầu để Admin phê duyệt.
       dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
@@ -173,8 +174,8 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
   return (
     <Dialog open={open} onClose={onClose} wide>
       <DialogHeader
-        title={initial ? 'Chỉnh sửa dự án' : isAdmin ? 'Tạo dự án mới' : 'Yêu cầu tạo dự án'}
-        desc={initial ? `Cập nhật thông tin cho ${initial.code}` : isAdmin ? 'Điền thông tin để bắt đầu một dự án mới' : 'Yêu cầu của bạn sẽ được gửi đến admin để phê duyệt'}
+        title={initial ? 'Chỉnh sửa dự án' : canDirect ? 'Tạo dự án mới' : 'Yêu cầu tạo dự án'}
+        desc={initial ? `Cập nhật thông tin cho ${initial.code}` : canDirect ? 'Điền thông tin để bắt đầu một dự án mới' : 'Yêu cầu của bạn sẽ được gửi đến Admin để phê duyệt'}
         onClose={onClose}
       />
       <DialogBody className="flex flex-col gap-4">

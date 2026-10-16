@@ -20,6 +20,14 @@ import {
   type WorkspaceBundle,
 } from '../lib/db';
 import { toast } from '../components/ui/toast';
+import {
+  assignableRoles,
+  canDirectProjectAction,
+  canManageMembers,
+  canRequestProjects,
+  canReviewProjectRequests,
+  canReviewTasks,
+} from '../lib/roles';
 import type {
   ActivityLog,
   ChecklistItem,
@@ -426,8 +434,8 @@ function assertApprovalPermission(state: AppState, action: Action): void {
   const prev = state.tasks.find((t) => t.id === taskId);
   if (!prev || prev.status !== 'in_review' || nextStatus === 'in_review') return;
   const me = state.users.find((u) => u.id === state.currentUserId);
-  if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
-    throw new Error('Nhiệm vụ đang chờ duyệt — chỉ Owner/Admin mới được duyệt hoặc trả về.');
+  if (!me || !canReviewTasks(me.role)) {
+    throw new Error('Nhiệm vụ đang chờ duyệt — chỉ Admin/Owner mới được duyệt hoặc trả về.');
   }
 }
 
@@ -438,22 +446,59 @@ function assertApprovalPermission(state: AppState, action: Action): void {
  */
 function assertProjectPermission(state: AppState, action: Action): void {
   const me = state.users.find((u) => u.id === state.currentUserId);
-  const isAdmin = !!me && (me.role === 'owner' || me.role === 'admin');
-  if (action.type === 'PROJECT_REQUEST_REVIEW' && !isAdmin) {
-    throw new Error('Chỉ Owner/Admin mới được duyệt yêu cầu.');
+  const role = me?.role ?? 'viewer';
+
+  // Chỉ Admin được duyệt / từ chối yêu cầu.
+  if (action.type === 'PROJECT_REQUEST_REVIEW' && !canReviewProjectRequests(role)) {
+    throw new Error('Chỉ Admin mới được duyệt yêu cầu.');
   }
-  if (isAdmin) return;
+  // Chỉ Owner (và Admin) được gửi yêu cầu.
+  if (action.type === 'PROJECT_REQUEST_CREATE' && !canRequestProjects(role)) {
+    throw new Error('Chỉ Owner mới được gửi yêu cầu đến Admin.');
+  }
+  // Admin làm trực tiếp, không cần qua duyệt.
+  if (canDirectProjectAction(role)) return;
+
   if (action.type === 'PROJECT_ADD') {
-    throw new Error('Bạn cần gửi yêu cầu tạo dự án để admin phê duyệt.');
+    throw new Error(
+      role === 'owner'
+        ? 'Bạn cần gửi yêu cầu tạo dự án để Admin phê duyệt.'
+        : 'Chỉ Owner mới được gửi yêu cầu tạo dự án.',
+    );
   }
   if (action.type === 'PROJECT_DELETE') {
-    throw new Error('Bạn cần gửi yêu cầu xóa dự án để admin phê duyệt.');
+    throw new Error(
+      role === 'owner'
+        ? 'Bạn cần gửi yêu cầu xóa dự án để Admin phê duyệt.'
+        : 'Chỉ Owner mới được gửi yêu cầu xóa dự án.',
+    );
   }
   if (action.type === 'PROJECT_UPDATE') {
     const prev = state.projects.find((p) => p.id === action.project.id);
     if (prev && prev.status !== 'paused' && action.project.status === 'paused') {
-      throw new Error('Bạn cần gửi yêu cầu tạm dừng dự án để admin phê duyệt.');
+      throw new Error(
+        role === 'owner'
+          ? 'Bạn cần gửi yêu cầu tạm dừng dự án để Admin phê duyệt.'
+          : 'Chỉ Owner mới được gửi yêu cầu tạm dừng dự án.',
+      );
     }
+  }
+}
+
+/**
+ * Phân quyền quản lý thành viên: Owner chỉ được phân công
+ * Manager/Member/Viewer; chỉ Admin được gán vai trò Owner/Admin.
+ */
+function assertMemberPermission(state: AppState, action: Action): void {
+  if (action.type !== 'USER_UPDATE_ROLE' && action.type !== 'USER_ADD') return;
+  const me = state.users.find((u) => u.id === state.currentUserId);
+  const role = me?.role ?? 'viewer';
+  if (!canManageMembers(role)) {
+    throw new Error('Chỉ Owner/Admin mới được quản lý thành viên.');
+  }
+  const targetRole = action.role;
+  if (!assignableRoles(role).includes(targetRole)) {
+    throw new Error('Bạn không được phép gán vai trò này.');
   }
 }
 
@@ -468,6 +513,7 @@ function assertProjectPermission(state: AppState, action: Action): void {
     try {
       assertApprovalPermission(stateRef.current, action);
       assertProjectPermission(stateRef.current, action);
+      assertMemberPermission(stateRef.current, action);
       const enriched = await persistAction(getSupabase(), ctx, stateRef.current, action);
       baseDispatch(enriched);
     } catch (e) {
