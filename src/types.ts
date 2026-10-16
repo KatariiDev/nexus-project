@@ -106,6 +106,36 @@ export interface Notification {
   createdAt: string;
 }
 
+/** Yêu cầu phê duyệt liên quan đến dự án (member gửi → Owner/Admin duyệt). */
+export type ProjectRequestType = 'create_project' | 'pause_project' | 'delete_project';
+export type ProjectRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface ProjectRequest {
+  id: string;
+  workspaceId: string;
+  type: ProjectRequestType;
+  /** Có giá trị với pause/delete; null với create (dự án chưa tồn tại). */
+  projectId?: string;
+  /** Dữ liệu dự án muốn tạo (chỉ dùng với create_project). */
+  payload: Partial<Project>;
+  status: ProjectRequestStatus;
+  requestedBy: string;
+  reviewedBy?: string;
+  reviewNote?: string;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
+export const PROJECT_REQUEST_TYPES: { value: ProjectRequestType; label: string }[] = [
+  { value: 'create_project', label: 'Tạo dự án' },
+  { value: 'pause_project', label: 'Tạm dừng dự án' },
+  { value: 'delete_project', label: 'Xóa dự án' },
+];
+
+export function projectRequestTypeLabel(t: ProjectRequestType): string {
+  return PROJECT_REQUEST_TYPES.find((x) => x.value === t)?.label ?? t;
+}
+
 export interface ActivityLog {
   id: string;
   actorId: string;

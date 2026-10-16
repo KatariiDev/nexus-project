@@ -15,6 +15,7 @@ import type {
   Label,
   Notification,
   Project,
+  ProjectRequest,
   Task,
   TaskAttachment,
   TaskComment,
@@ -185,6 +186,7 @@ export interface WorkspaceBundle {
   notifications: Notification[];
   activityLogs: ActivityLog[];
   documents: Document[];
+  projectRequests: ProjectRequest[];
 }
 
 /** Tải toàn bộ dữ liệu của workspace sau khi đăng nhập. */
@@ -211,6 +213,7 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     notifsRes,
     logsRes,
     docsRes,
+    requestsRes,
   ] = await Promise.all([
     sb.from('workspaces').select('*').eq('id', workspaceId).single(),
     sb.from('workspace_members').select('user_id, role, profiles(id, name, email, title)').eq('workspace_id', workspaceId),
@@ -227,9 +230,10 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     sb.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(100),
     sb.from('activity_logs').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(200),
     sb.from('documents').select('*').eq('workspace_id', workspaceId).order('updated_at', { ascending: false }),
+    sb.from('project_requests').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(200),
   ]);
 
-  for (const r of [wsRes, membersRes, labelsRes, projectMembersRes, tasksRes, assigneesRes, watchersRes, taskLabelsRes, commentsRes, checklistsRes, depsRes, attachmentsRes, notifsRes, logsRes, docsRes]) {
+  for (const r of [wsRes, membersRes, labelsRes, projectMembersRes, tasksRes, assigneesRes, watchersRes, taskLabelsRes, commentsRes, checklistsRes, depsRes, attachmentsRes, notifsRes, logsRes, docsRes, requestsRes]) {
     if (r.error) throw r.error;
   }
 
@@ -313,6 +317,25 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
         id: d.id, projectId: d.project_id ?? undefined, title: d.title, content: d.content ?? '',
         authorId: d.author_id, createdAt: d.created_at, updatedAt: d.updated_at,
       })),
+    projectRequests: ((requestsRes.data ?? []) as {
+      id: string; workspace_id: string; type: string; project_id: string | null;
+      payload: Record<string, unknown>; status: string; requested_by: string;
+      reviewed_by: string | null; review_note: string | null;
+      created_at: string; reviewed_at: string | null;
+    }[])
+      .map((r) => ({
+        id: r.id,
+        workspaceId: r.workspace_id,
+        type: r.type as ProjectRequest['type'],
+        projectId: r.project_id ?? undefined,
+        payload: (r.payload ?? {}) as Partial<Project>,
+        status: r.status as ProjectRequest['status'],
+        requestedBy: r.requested_by,
+        reviewedBy: r.reviewed_by ?? undefined,
+        reviewNote: r.review_note ?? undefined,
+        createdAt: r.created_at,
+        reviewedAt: r.reviewed_at ?? undefined,
+      })),
   };
 }
 
@@ -336,6 +359,9 @@ export type RichAction = Action & {
   user?: User;
   doc?: Document;
   task?: Task;
+  project?: Project;
+  request?: ProjectRequest;
+  projectDeletedId?: string;
 };
 
 function buildLog(
@@ -354,6 +380,24 @@ function buildLog(
     entityName,
     createdAt: new Date().toISOString(),
   };
+}
+
+/** Tiêu đề hiển thị cho một yêu cầu phê duyệt dự án. */
+function requestTitle(
+  r: Pick<ProjectRequest, 'type' | 'payload'>,
+  fallbackName?: string,
+): string {
+  const rawName =
+    typeof r.payload?.name === 'string' && r.payload.name ? r.payload.name : fallbackName;
+  const name = rawName ? ` "${rawName}"` : '';
+  switch (r.type) {
+    case 'create_project':
+      return `Tạo dự án${name}`;
+    case 'pause_project':
+      return `Tạm dừng dự án${name}`;
+    case 'delete_project':
+      return `Xóa dự án${name}`;
+  }
 }
 
 async function insertLog(sb: Sb, ctx: PersistContext, log: ActivityLog): Promise<void> {
@@ -410,7 +454,7 @@ async function notifyAssignees(
     kind: 'assigned',
     title: 'Bạn được giao nhiệm vụ mới',
     body: `${ctx.userName} đã giao cho bạn "${task.title}".`,
-    link: `/tasks/${task.id}`,
+    link: `/user/tasks/${task.id}`,
   }));
   const { error } = await sb.from('notifications').insert(rows);
   if (error) throw error;
@@ -445,7 +489,7 @@ async function notifyReview(
     kind: 'review',
     title: meta.title,
     body: meta.body,
-    link: `/tasks/${task.id}`,
+    link: `/user/tasks/${task.id}`,
   }));
   const { error } = await sb.from('notifications').insert(rows);
   if (error) throw error;
@@ -529,6 +573,122 @@ export async function persistAction(
       const { error } = await sb.from('projects').delete().eq('id', action.id);
       if (error) throwDb(error, 'Không xóa được dự án.');
       return action;
+    }
+
+    case 'PROJECT_REQUEST_CREATE': {
+      const r = action.request;
+      const { error } = await sb.from('project_requests').insert({
+        id: r.id,
+        workspace_id: ctx.workspaceId,
+        type: r.type,
+        project_id: r.projectId ?? null,
+        payload: r.payload as Record<string, unknown>,
+        status: 'pending',
+        requested_by: ctx.userId,
+      });
+      if (error) throwDb(error, 'Không gửi được yêu cầu.');
+      const log = buildLog(ctx, 'đã gửi yêu cầu', 'project', r.projectId ?? r.id, requestTitle(r));
+      await insertLog(sb, ctx, log);
+      // Báo cho Owner/Admin biết có yêu cầu mới cần duyệt.
+      const admins = state.users.filter((u) => (u.role === 'owner' || u.role === 'admin') && u.id !== ctx.userId);
+      if (admins.length > 0) {
+        const rows = admins.map((u) => ({
+          id: newId(),
+          user_id: u.id,
+          kind: 'project',
+          title: 'Yêu cầu mới cần phê duyệt',
+          body: `${ctx.userName} đã gửi yêu cầu "${requestTitle(r)}".`,
+          link: '/admin/approvals',
+        }));
+        const { error: nErr } = await sb.from('notifications').insert(rows);
+        if (nErr) throw nErr;
+      }
+      return { ...action, log };
+    }
+
+    case 'PROJECT_REQUEST_REVIEW': {
+      const req = state.projectRequests.find((x) => x.id === action.id);
+      if (!req) throwDb(new Error('not found'), 'Không tìm thấy yêu cầu.');
+      if (req.status !== 'pending') throwDb(new Error('already reviewed'), 'Yêu cầu đã được xử lý trước đó.');
+      const reqProject = req.projectId ? state.projects.find((x) => x.id === req.projectId) : undefined;
+      const title = requestTitle(req, reqProject?.name);
+      const now = new Date().toISOString();
+      const status = action.approve ? 'approved' : 'rejected';
+      const { error } = await sb
+        .from('project_requests')
+        .update({ status, reviewed_by: ctx.userId, review_note: action.note ?? null, reviewed_at: now })
+        .eq('id', action.id);
+      if (error) throwDb(error, 'Không cập nhật được yêu cầu.');
+
+      // Thi hành yêu cầu khi được duyệt.
+      let executedLog: ActivityLog | undefined;
+      let reviewedProject: Project | undefined;
+      let deletedProjectId: string | undefined;
+      if (action.approve) {
+        if (req.type === 'create_project') {
+          const p = req.payload as Partial<Project>;
+          const project: Project = {
+            id: newId(),
+            code: String(p.code ?? ''),
+            name: String(p.name ?? 'Dự án mới'),
+            description: String(p.description ?? ''),
+            status: 'planning',
+            priority: (p.priority as Project['priority']) ?? 'medium',
+            startDate: String(p.startDate ?? now.slice(0, 10)),
+            endDate: String(p.endDate ?? now.slice(0, 10)),
+            managerId: String(p.managerId ?? ctx.userId),
+            memberIds: Array.isArray(p.memberIds) ? (p.memberIds as string[]) : [ctx.userId],
+            budget: typeof p.budget === 'number' ? p.budget : undefined,
+            color: String(p.color ?? '#4F46E5'),
+            createdAt: now,
+            updatedAt: now,
+          };
+          const { error: cErr } = await sb.from('projects').insert(toProjectRow(project, ctx.workspaceId));
+          if (cErr) throwDb(cErr, 'Không tạo được dự án (mã dự án có thể đã tồn tại).');
+          await syncJoin(sb, 'project_members', 'project_id', project.id, 'user_id', [], project.memberIds);
+          reviewedProject = project;
+          executedLog = buildLog(ctx, 'đã duyệt yêu cầu tạo', 'project', project.id, project.name);
+          await insertLog(sb, ctx, executedLog);
+        } else if (req.type === 'pause_project' && req.projectId) {
+          const proj = state.projects.find((x) => x.id === req.projectId);
+          if (proj) {
+            const updated = { ...proj, status: 'paused' as const, updatedAt: now };
+            const { error: uErr } = await sb.from('projects').update(toProjectRow(updated, ctx.workspaceId)).eq('id', proj.id);
+            if (uErr) throwDb(uErr, 'Không tạm dừng được dự án.');
+            reviewedProject = updated;
+            executedLog = buildLog(ctx, 'đã duyệt yêu cầu tạm dừng', 'project', proj.id, proj.name);
+            await insertLog(sb, ctx, executedLog);
+          }
+        } else if (req.type === 'delete_project' && req.projectId) {
+          const proj = state.projects.find((x) => x.id === req.projectId);
+          const { error: dErr } = await sb.from('projects').delete().eq('id', req.projectId);
+          if (dErr) throwDb(dErr, 'Không xóa được dự án.');
+          deletedProjectId = req.projectId;
+          if (proj) {
+            executedLog = buildLog(ctx, 'đã duyệt yêu cầu xóa', 'project', proj.id, proj.name);
+            await insertLog(sb, ctx, executedLog);
+          }
+        }
+      }
+
+      // Báo kết quả cho người yêu cầu.
+      if (req.requestedBy !== ctx.userId) {
+        const verb = action.approve ? 'đã được duyệt' : 'đã bị từ chối';
+        const { error: nErr } = await sb.from('notifications').insert({
+          id: newId(),
+          user_id: req.requestedBy,
+          kind: 'project',
+          title: `Yêu cầu ${verb}`,
+          body: `Yêu cầu "${title}" của bạn ${verb}${action.note ? `: ${action.note}` : '.'}`,
+          link: '/user/projects',
+        });
+        if (nErr) throw nErr;
+      }
+      const reviewed: ProjectRequest = {
+        ...req, status, reviewedBy: ctx.userId,
+        reviewNote: action.note ?? undefined, reviewedAt: now,
+      };
+      return { ...action, request: reviewed, log: executedLog, project: reviewedProject, projectDeletedId: deletedProjectId };
     }
 
     case 'TASK_ADD': {
