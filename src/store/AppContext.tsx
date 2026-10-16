@@ -27,6 +27,7 @@ import type {
   Label,
   Notification,
   Project,
+  ProjectRequest,
   Task,
   TaskAttachment,
   TaskComment,
@@ -53,6 +54,7 @@ export interface AppState {
   notifications: Notification[];
   activityLogs: ActivityLog[];
   documents: Document[];
+  projectRequests: ProjectRequest[];
   theme: 'light' | 'dark';
   sidebarCollapsed: boolean;
 }
@@ -64,6 +66,8 @@ export type Action =
   | { type: 'PROJECT_ADD'; project: Project }
   | { type: 'PROJECT_UPDATE'; project: Project }
   | { type: 'PROJECT_DELETE'; id: string }
+  | { type: 'PROJECT_REQUEST_CREATE'; request: ProjectRequest }
+  | { type: 'PROJECT_REQUEST_REVIEW'; id: string; approve: boolean; note?: string }
   | { type: 'TASK_ADD'; task: Task }
   | { type: 'TASK_UPDATE'; task: Task }
   | { type: 'TASK_DELETE'; id: string }
@@ -90,7 +94,15 @@ export type Action =
  * (kèm log/user/doc/task đã ghi xuống DB) + các action vòng đời session.
  */
 export type RichAction =
-  | (Action & { log?: ActivityLog; user?: User; doc?: Document; task?: Task })
+  | (Action & {
+      log?: ActivityLog;
+      user?: User;
+      doc?: Document;
+      task?: Task;
+      project?: Project;
+      request?: ProjectRequest;
+      projectDeletedId?: string;
+    })
   | { type: 'HYDRATE'; bundle: WorkspaceBundle; userId: string }
   | { type: 'SESSION_END' }
   | { type: 'BOOT_DONE' }
@@ -130,6 +142,7 @@ function emptyState(): AppState {
     notifications: [],
     activityLogs: [],
     documents: [],
+    projectRequests: [],
     theme: readTheme(),
     sidebarCollapsed,
   };
@@ -159,6 +172,7 @@ function reducer(state: AppState, action: RichAction): AppState {
         notifications: action.bundle.notifications,
         activityLogs: action.bundle.activityLogs,
         documents: action.bundle.documents,
+        projectRequests: action.bundle.projectRequests,
       };
     case 'SESSION_END':
       return { ...emptyState(), loading: false, theme: state.theme };
@@ -185,6 +199,30 @@ function reducer(state: AppState, action: RichAction): AppState {
       };
     case 'PROJECT_DELETE':
       return { ...state, projects: state.projects.filter((p) => p.id !== action.id) };
+    case 'PROJECT_REQUEST_CREATE':
+      return {
+        ...state,
+        projectRequests: [action.request, ...state.projectRequests],
+        activityLogs: withLog(state.activityLogs, action.log),
+      };
+    case 'PROJECT_REQUEST_REVIEW': {
+      let projects = state.projects;
+      if (action.project) {
+        projects = projects.some((p) => p.id === action.project!.id)
+          ? projects.map((p) => (p.id === action.project!.id ? action.project! : p))
+          : [action.project!, ...projects];
+      }
+      if (action.projectDeletedId) {
+        const delId = action.projectDeletedId;
+        projects = projects.filter((p) => p.id !== delId);
+      }
+      return {
+        ...state,
+        projects,
+        projectRequests: state.projectRequests.map((r) => (r.id === action.request!.id ? action.request! : r)),
+        activityLogs: withLog(state.activityLogs, action.log),
+      };
+    }
     case 'TASK_ADD':
       return {
         ...state,
@@ -393,6 +431,32 @@ function assertApprovalPermission(state: AppState, action: Action): void {
   }
 }
 
+/**
+ * Quy tắc phê duyệt dự án: thành viên thường không được tự tạo / tạm dừng /
+ * xóa dự án — phải gửi yêu cầu để Owner/Admin duyệt. Chỉ Owner/Admin được
+ * duyệt hoặc từ chối yêu cầu.
+ */
+function assertProjectPermission(state: AppState, action: Action): void {
+  const me = state.users.find((u) => u.id === state.currentUserId);
+  const isAdmin = !!me && (me.role === 'owner' || me.role === 'admin');
+  if (action.type === 'PROJECT_REQUEST_REVIEW' && !isAdmin) {
+    throw new Error('Chỉ Owner/Admin mới được duyệt yêu cầu.');
+  }
+  if (isAdmin) return;
+  if (action.type === 'PROJECT_ADD') {
+    throw new Error('Bạn cần gửi yêu cầu tạo dự án để admin phê duyệt.');
+  }
+  if (action.type === 'PROJECT_DELETE') {
+    throw new Error('Bạn cần gửi yêu cầu xóa dự án để admin phê duyệt.');
+  }
+  if (action.type === 'PROJECT_UPDATE') {
+    const prev = state.projects.find((p) => p.id === action.project.id);
+    if (prev && prev.status !== 'paused' && action.project.status === 'paused') {
+      throw new Error('Bạn cần gửi yêu cầu tạm dừng dự án để admin phê duyệt.');
+    }
+  }
+}
+
   const dispatch = useCallback(async (action: Action) => {
     // SET_THEME / TOGGLE_SIDEBAR chỉ là trạng thái giao diện cục bộ
     if (action.type === 'SET_THEME' || action.type === 'TOGGLE_SIDEBAR') {
@@ -403,6 +467,7 @@ function assertApprovalPermission(state: AppState, action: Action): void {
     if (!ctx) return;
     try {
       assertApprovalPermission(stateRef.current, action);
+      assertProjectPermission(stateRef.current, action);
       const enriched = await persistAction(getSupabase(), ctx, stateRef.current, action);
       baseDispatch(enriched);
     } catch (e) {
