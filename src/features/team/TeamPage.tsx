@@ -12,6 +12,7 @@ import { Card, CardContent } from '../../components/ui/card';
 import { toast } from '../../components/ui/toast';
 import { WORKSPACE_ROLES, roleLabel } from '../../types';
 import type { User, WorkspaceRole } from '../../types';
+import { assignableRoles, canManageMembers } from '../../lib/roles';
 
 type RoleTone = 'purple' | 'primary' | 'info' | 'muted';
 
@@ -51,6 +52,8 @@ export function TeamPage() {
     setQuickCreateTab('member');
     setQuickCreateOpen(true);
   };
+  const canInvite = canManageMembers(me.role);
+  const allowedRoles = assignableRoles(me.role);
 
   return (
     <div className="flex flex-col gap-5">
@@ -58,10 +61,12 @@ export function TeamPage() {
         title="Nhóm & Nhân sự"
         desc={`${state.users.length} thành viên trong workspace`}
         actions={
-          <Button onClick={inviteMember}>
-            <UserPlus className="h-4 w-4" />
-            Mời thành viên
-          </Button>
+          canInvite ? (
+            <Button onClick={inviteMember}>
+              <UserPlus className="h-4 w-4" />
+              Mời thành viên
+            </Button>
+          ) : undefined
         }
       />
 
@@ -71,9 +76,11 @@ export function TeamPage() {
           title="Chưa có thành viên"
           desc="Mời thành viên đầu tiên vào workspace để bắt đầu cộng tác."
           action={
-            <Button onClick={inviteMember}>
-              <UserPlus className="h-4 w-4" /> Mời thành viên
-            </Button>
+            canInvite ? (
+              <Button onClick={inviteMember}>
+                <UserPlus className="h-4 w-4" /> Mời thành viên
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -133,13 +140,13 @@ export function TeamPage() {
                     <span className="text-xs text-muted-foreground">Vai trò:</span>
                     <Select
                       value={u.role}
-                      disabled={isSelf}
-                      title={isSelf ? 'Bạn không thể tự thay đổi vai trò của chính mình' : 'Đổi vai trò'}
+                      disabled={isSelf || !canInvite}
+                      title={isSelf ? 'Bạn không thể tự thay đổi vai trò của chính mình' : canInvite ? 'Đổi vai trò' : 'Chỉ Admin/Owner mới được đổi vai trò'}
                       onChange={(e) => handleRoleChange(u, e.target.value as WorkspaceRole)}
                       className="h-8 text-xs"
                       aria-label={`Vai trò của ${u.name}`}
                     >
-                      {WORKSPACE_ROLES.map((r) => (
+                      {WORKSPACE_ROLES.filter((r) => allowedRoles.includes(r.value) || r.value === u.role).map((r) => (
                         <option key={r.value} value={r.value}>
                           {r.label}
                         </option>

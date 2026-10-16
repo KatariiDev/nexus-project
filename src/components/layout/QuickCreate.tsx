@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../../store/AppContext';
+import { assignableRoles, canDirectProjectAction, canManageMembers, canRequestProjects } from '../../lib/roles';
 import { useUI } from './UIContext';
 import { Dialog, DialogHeader, DialogBody, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
@@ -26,7 +27,7 @@ function useForm<T extends Record<string, string>>(initial: T) {
 function ProjectQuickForm({ onDone }: { onDone: () => void }) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
-  const isAdmin = me.role === 'owner' || me.role === 'admin';
+  const canDirect = canDirectProjectAction(me.role);
   const f = useForm({ name: '', code: '', description: '', status: 'planning' as string, priority: 'medium' as string, managerId: state.currentUserId, startDate: '', endDate: '' });
 
   const submit = () => {
@@ -45,7 +46,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
       memberIds: [f.values.managerId],
       color: '#4F46E5',
     };
-    if (isAdmin) {
+    if (canDirect) {
       dispatch({
         type: 'PROJECT_ADD',
         project: {
@@ -56,6 +57,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
       });
       toast('Tạo dự án thành công', f.values.name.trim());
     } else {
+      // Owner: gửi yêu cầu để Admin phê duyệt.
       dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
@@ -89,7 +91,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
         <Field label="Bắt đầu"><Input type="date" value={f.values.startDate} onChange={(e) => f.set('startDate', e.target.value)} /></Field>
         <Field label="Kết thúc"><Input type="date" value={f.values.endDate} onChange={(e) => f.set('endDate', e.target.value)} /></Field>
       </div>
-      <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>{isAdmin ? 'Tạo dự án' : 'Gửi yêu cầu'}</Button></DialogFooter>
+      <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>{canDirect ? 'Tạo dự án' : 'Gửi yêu cầu'}</Button></DialogFooter>
     </div>
   );
 }
@@ -140,11 +142,14 @@ function TaskQuickForm({ onDone }: { onDone: () => void }) {
 
 function MemberQuickForm({ onDone }: { onDone: () => void }) {
   const { dispatch } = useApp();
-  const f = useForm({ email: '', role: 'member' as string });
+  const me = useCurrentUser();
+  const allowed = assignableRoles(me.role);
+  const f = useForm({ email: '', role: allowed[0] ?? 'member' });
 
   const submit = () => {
     const errs: Record<string, string> = {};
     if (!/^\S+@\S+\.\S+$/.test(f.values.email)) errs.email = 'Email không hợp lệ';
+    if (!allowed.includes(f.values.role as WorkspaceRole)) errs.role = 'Bạn không được phép gán vai trò này';
     if (Object.keys(errs).length) { f.setErrors(errs); return; }
     void dispatch({ type: 'USER_ADD', email: f.values.email.trim(), role: f.values.role as WorkspaceRole })
       .then(() => {
@@ -153,11 +158,20 @@ function MemberQuickForm({ onDone }: { onDone: () => void }) {
       });
   };
 
+  const roleMeta = (v: string) => WORKSPACE_ROLES.find((r) => r.value === v);
+
   return (
     <div className="flex flex-col gap-4">
       <Field label="Email" error={f.errors.email}><Input value={f.values.email} onChange={(e) => f.set('email', e.target.value)} placeholder="email@congty.vn" /></Field>
       <p className="-mt-2 text-xs text-muted-foreground">Người này phải đã đăng ký tài khoản Nexus trước.</p>
-      <Field label="Vai trò"><Select value={f.values.role} onChange={(e) => f.set('role', e.target.value)}>{WORKSPACE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label} — {r.desc}</option>)}</Select></Field>
+      <Field label="Vai trò" error={f.errors.role}>
+        <Select value={f.values.role} onChange={(e) => f.set('role', e.target.value)}>
+          {allowed.map((v) => {
+            const m = roleMeta(v);
+            return <option key={v} value={v}>{m?.label} — {m?.desc}</option>;
+          })}
+        </Select>
+      </Field>
       <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>Thêm thành viên</Button></DialogFooter>
     </div>
   );
@@ -187,7 +201,10 @@ function DocQuickForm({ onDone }: { onDone: () => void }) {
 
 export function QuickCreate() {
   const { quickCreateOpen, setQuickCreateOpen, quickCreateTab, setQuickCreateTab } = useUI();
+  const me = useCurrentUser();
   const close = () => setQuickCreateOpen(false);
+  const showProject = canRequestProjects(me.role);
+  const showMember = canManageMembers(me.role);
 
   return (
     <Dialog open={quickCreateOpen} onClose={close} wide>
@@ -198,15 +215,15 @@ export function QuickCreate() {
           onChange={setQuickCreateTab}
           tabs={[
             { value: 'task', label: 'Nhiệm vụ' },
-            { value: 'project', label: 'Dự án' },
-            { value: 'member', label: 'Thành viên' },
+            ...(showProject ? [{ value: 'project', label: 'Dự án' }] : []),
+            ...(showMember ? [{ value: 'member', label: 'Thành viên' }] : []),
             { value: 'document', label: 'Tài liệu' },
           ]}
           className="mb-5"
         />
         {quickCreateTab === 'task' && <TaskQuickForm onDone={close} />}
-        {quickCreateTab === 'project' && <ProjectQuickForm onDone={close} />}
-        {quickCreateTab === 'member' && <MemberQuickForm onDone={close} />}
+        {quickCreateTab === 'project' && showProject && <ProjectQuickForm onDone={close} />}
+        {quickCreateTab === 'member' && showMember && <MemberQuickForm onDone={close} />}
         {quickCreateTab === 'document' && <DocQuickForm onDone={close} />}
       </DialogBody>
     </Dialog>

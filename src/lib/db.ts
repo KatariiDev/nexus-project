@@ -589,8 +589,8 @@ export async function persistAction(
       if (error) throwDb(error, 'Không gửi được yêu cầu.');
       const log = buildLog(ctx, 'đã gửi yêu cầu', 'project', r.projectId ?? r.id, requestTitle(r));
       await insertLog(sb, ctx, log);
-      // Báo cho Owner/Admin biết có yêu cầu mới cần duyệt.
-      const admins = state.users.filter((u) => (u.role === 'owner' || u.role === 'admin') && u.id !== ctx.userId);
+      // Báo cho Admin biết có yêu cầu mới cần duyệt.
+      const admins = state.users.filter((u) => u.role === 'admin' && u.id !== ctx.userId);
       if (admins.length > 0) {
         const rows = admins.map((u) => ({
           id: newId(),

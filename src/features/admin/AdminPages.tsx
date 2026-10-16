@@ -16,6 +16,7 @@ import { Avatar } from '../../components/ui/avatar';
 import { toast } from '../../components/ui/toast';
 import { timeAgo } from '../../lib/format';
 import { cn } from '../../lib/utils';
+import { canAccessAdmin } from '../../lib/roles';
 import type { ProjectRequest, ProjectRequestStatus } from '../../types';
 import { projectRequestTypeLabel } from '../../types';
 
@@ -27,7 +28,7 @@ const ADMIN_NAV = [
   { to: '/admin/logs', label: 'Nhật ký', icon: History },
 ];
 
-/** Layout riêng cho khu vực /admin/* — chỉ Owner/Admin vào được (guard ở router). */
+/** Layout riêng cho khu vực /admin/* — chỉ Admin vào được (guard ở router). */
 export function AdminShell() {
   const { state } = useApp();
   const pending = state.projectRequests.filter((r) => r.status === 'pending').length;
@@ -38,7 +39,7 @@ export function AdminShell() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Trang quản trị</h1>
-            <p className="text-sm text-muted-foreground">{state.workspace.name} · Khu vực dành cho Owner/Admin</p>
+            <p className="text-sm text-muted-foreground">{state.workspace.name} · Khu vực dành cho Admin</p>
           </div>
           <Button variant="outline" onClick={() => (window.location.href = '/user')}>
             <ArrowLeft className="h-4 w-4" /> Về trang người dùng
@@ -329,15 +330,15 @@ export function AdminLogsPage() {
   );
 }
 
-/** Guard dùng trong router: chỉ Owner/Admin được vào /admin/*. */
+/** Guard dùng trong router: chỉ Admin được vào /admin/*. */
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
   const me = useCurrentUser();
-  if (me.role !== 'owner' && me.role !== 'admin') {
+  if (!canAccessAdmin(me.role)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
         <ShieldCheck className="h-12 w-12 text-muted-foreground" />
         <h1 className="text-xl font-bold">Không có quyền truy cập</h1>
-        <p className="text-sm text-muted-foreground">Khu vực này chỉ dành cho Owner/Admin.</p>
+        <p className="text-sm text-muted-foreground">Khu vực này chỉ dành cho Admin.</p>
         <Button onClick={() => (window.location.href = '/user')}>
           <ArrowLeft className="h-4 w-4" /> Về trang người dùng
         </Button>

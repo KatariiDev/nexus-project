@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useApp, useCurrentUser } from '../../store/AppContext';
+import { canAccessAdmin } from '../../lib/roles';
 import { Avatar } from '../ui/avatar';
 
 export const NAV_ITEMS = [
@@ -27,7 +28,7 @@ export function Sidebar() {
   const user = useCurrentUser();
   const collapsed = state.sidebarCollapsed;
   const unread = state.notifications.filter((n) => n.userId === state.currentUserId && !n.read).length;
-  const isAdmin = user.role === 'owner' || user.role === 'admin';
+  const isAdmin = canAccessAdmin(user.role);
   const pendingCount = state.projectRequests.filter((r) => r.status === 'pending').length;
 
   return (
