@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Hexagon } from 'lucide-react';
-import { useApp } from './store/AppContext';
+import { useApp, useCurrentUser } from './store/AppContext';
+import { canAccessAdmin } from './lib/roles';
 import { AppShell } from './components/layout/AppShell';
 import { LoginPage, RegisterPage, ForgotPasswordPage } from './features/auth/AuthPages';
 import { DashboardPage } from './features/dashboard/DashboardPage';
@@ -65,7 +66,29 @@ function Fallback() {
   if (LEGACY_PREFIXES.includes(seg)) {
     return <Navigate to={`/user${loc.pathname}${loc.search}`} replace />;
   }
-  return <Navigate to="/user" replace />;
+  return <Navigate to="/" replace />;
+}
+
+/**
+ * Trang đích sau đăng nhập: Admin vào thẳng /admin,
+ * các vai trò còn lại vào /user.
+ */
+function Landing() {
+  const { state } = useApp();
+  const me = useCurrentUser();
+
+  if (state.loading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+          <Hexagon className="h-8 w-8 animate-pulse" />
+        </span>
+        <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
+      </div>
+    );
+  }
+  if (!state.authed) return <Navigate to="/login" replace />;
+  return <Navigate to={canAccessAdmin(me.role) ? '/admin' : '/user'} replace />;
 }
 
 export default function App() {
@@ -99,7 +122,7 @@ export default function App() {
           <Route path="settings" element={<SettingsPage />} />
         </Route>
 
-        {/* Khu vực quản trị — chỉ Owner/Admin */}
+        {/* Khu vực quản trị — chỉ Admin */}
         <Route
           path="/admin/*"
           element={
@@ -118,7 +141,7 @@ export default function App() {
           <Route path="logs" element={<AdminLogsPage />} />
         </Route>
 
-        <Route path="/" element={<Navigate to="/user" replace />} />
+        <Route path="/" element={<Landing />} />
         <Route path="*" element={<Fallback />} />
       </Routes>
     </BrowserRouter>
