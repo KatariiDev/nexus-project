@@ -10,13 +10,15 @@ import {
   LayoutGrid,
   List,
   MoreVertical,
+  Pause,
   Pencil,
+  Play,
   Plus,
   Search,
   Trash2,
   Users,
 } from 'lucide-react';
-import { projectProgress, projectTasks, useApp, userById } from '../../store/AppContext';
+import { projectProgress, projectTasks, useApp, useCurrentUser, userById } from '../../store/AppContext';
 import { useUI } from '../../components/layout/UIContext';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -32,7 +34,7 @@ import { dueLabel, fmtDate, isOverdue, timeAgo } from '../../lib/format';
 import { PRIORITIES, PROJECT_STATUSES } from '../../types';
 import type { Priority, Project, ProjectStatus } from '../../types';
 import { ProjectForm } from './ProjectForm';
-import { cn } from '../../lib/utils';
+import { cn, newId } from '../../lib/utils';
 
 const PAGE_SIZE = 9;
 const DUE_TONE_CLASS: Record<string, string> = {
@@ -55,6 +57,8 @@ type SortKey = 'newest' | 'deadline' | 'progress';
 
 export function ProjectsPage() {
   const { state, dispatch } = useApp();
+  const me = useCurrentUser();
+  const isAdmin = me.role === 'owner' || me.role === 'admin';
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | ProjectStatus>('all');
@@ -102,9 +106,27 @@ export function ProjectsPage() {
   const handleDelete = () => {
     if (!deleteId) return;
     const target = state.projects.find((p) => p.id === deleteId);
-    dispatch({ type: 'PROJECT_DELETE', id: deleteId });
+    if (isAdmin) {
+      dispatch({ type: 'PROJECT_DELETE', id: deleteId });
+      toast('Đã xóa dự án', target?.name, 'success');
+    } else {
+      // Thành viên thường: gửi yêu cầu để Owner/Admin phê duyệt.
+      dispatch({
+        type: 'PROJECT_REQUEST_CREATE',
+        request: {
+          id: newId(),
+          workspaceId: state.workspace.id,
+          type: 'delete_project',
+          projectId: deleteId,
+          payload: { name: target?.name },
+          status: 'pending',
+          requestedBy: state.currentUserId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      toast('Đã gửi yêu cầu xóa dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
+    }
     setDeleteId(null);
-    toast('Đã xóa dự án', target?.name, 'success');
   };
 
   const toggleArchive = (project: Project) => {
@@ -253,7 +275,7 @@ export function ProjectsPage() {
                   const manager = userById(state.users, p.managerId);
                   const due = dueLabel(p.endDate, p.status === 'completed' ? 'done' : undefined);
                   return (
-                    <tr key={p.id} onClick={() => navigate(`/projects/${p.id}`)} className="cursor-pointer border-b last:border-0 hover:bg-accent/50">
+                    <tr key={p.id} onClick={() => navigate(`/user/projects/${p.id}`)} className="cursor-pointer border-b last:border-0 hover:bg-accent/50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <span className="h-8 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />
@@ -327,9 +349,9 @@ export function ProjectsPage() {
       <ProjectForm open={formState.open} initial={formState.initial} onClose={() => setFormState({ open: false })} />
       <ConfirmDialog
         open={deleteId !== null}
-        title="Xóa dự án?"
-        desc="Dự án sẽ bị xóa khỏi workspace. Hành động này không thể hoàn tác."
-        confirmLabel="Xóa dự án"
+        title={isAdmin ? 'Xóa dự án?' : 'Gửi yêu cầu xóa dự án?'}
+        desc={isAdmin ? 'Dự án sẽ bị xóa khỏi workspace. Hành động này không thể hoàn tác.' : 'Yêu cầu của bạn sẽ được gửi đến admin để phê duyệt.'}
+        confirmLabel={isAdmin ? 'Xóa dự án' : 'Gửi yêu cầu'}
         onCancel={() => setDeleteId(null)}
         onConfirm={handleDelete}
       />
@@ -362,7 +384,7 @@ function ProjectCard({
 
   return (
     <Card
-      onClick={() => navigate(`/projects/${project.id}`)}
+      onClick={() => navigate(`/user/projects/${project.id}`)}
       className="cursor-pointer overflow-hidden transition-shadow hover:shadow-lift"
     >
       <div className="h-1.5" style={{ backgroundColor: project.color }} />
@@ -432,6 +454,8 @@ type DetailTab = 'overview' | 'tasks' | 'activity';
 export function ProjectDetailPage() {
   const { id } = useParams();
   const { state, dispatch } = useApp();
+  const me = useCurrentUser();
+  const isAdmin = me.role === 'owner' || me.role === 'admin';
   const { openTask } = useUI();
   const navigate = useNavigate();
   const [tab, setTab] = useState<DetailTab>('overview');
@@ -443,7 +467,7 @@ export function ProjectDetailPage() {
   if (!project) {
     return (
       <div className="flex flex-col gap-4">
-        <Button variant="outline" className="w-fit" onClick={() => navigate('/projects')}>
+        <Button variant="outline" className="w-fit" onClick={() => navigate('/user/projects')}>
           <ChevronLeft className="h-4 w-4" /> Quay lại danh sách
         </Button>
         <EmptyState
@@ -474,10 +498,56 @@ export function ProjectDetailPage() {
   };
 
   const handleDelete = () => {
-    dispatch({ type: 'PROJECT_DELETE', id: project.id });
+    if (isAdmin) {
+      dispatch({ type: 'PROJECT_DELETE', id: project.id });
+      toast('Đã xóa dự án', project.name, 'success');
+    } else {
+      // Thành viên thường: gửi yêu cầu để Owner/Admin phê duyệt.
+      dispatch({
+        type: 'PROJECT_REQUEST_CREATE',
+        request: {
+          id: newId(),
+          workspaceId: state.workspace.id,
+          type: 'delete_project',
+          projectId: project.id,
+          payload: { name: project.name },
+          status: 'pending',
+          requestedBy: state.currentUserId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      toast('Đã gửi yêu cầu xóa dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
+    }
     setConfirmDelete(false);
-    toast('Đã xóa dự án', project.name, 'success');
-    navigate('/projects');
+    navigate('/user/projects');
+  };
+
+  const togglePause = () => {
+    const paused = project.status === 'paused';
+    if (paused) {
+      // Tiếp tục dự án: áp dụng ngay cho mọi vai trò.
+      dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: 'active', updatedAt: new Date().toISOString() } });
+      toast('Đã tiếp tục dự án', project.name);
+    } else if (isAdmin) {
+      dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: 'paused', updatedAt: new Date().toISOString() } });
+      toast('Đã tạm dừng dự án', project.name);
+    } else {
+      // Thành viên thường: gửi yêu cầu tạm dừng để Owner/Admin phê duyệt.
+      dispatch({
+        type: 'PROJECT_REQUEST_CREATE',
+        request: {
+          id: newId(),
+          workspaceId: state.workspace.id,
+          type: 'pause_project',
+          projectId: project.id,
+          payload: { name: project.name },
+          status: 'pending',
+          requestedBy: state.currentUserId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      toast('Đã gửi yêu cầu tạm dừng dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
+    }
   };
 
   const stats = [
@@ -489,7 +559,7 @@ export function ProjectDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Button variant="ghost" className="w-fit -ml-2" onClick={() => navigate('/projects')}>
+      <Button variant="ghost" className="w-fit -ml-2" onClick={() => navigate('/user/projects')}>
         <ChevronLeft className="h-4 w-4" /> Danh sách dự án
       </Button>
 
@@ -510,6 +580,12 @@ export function ProjectDetailPage() {
           <Button variant="outline" size="sm" onClick={() => setFormOpen(true)}>
             <Pencil className="h-4 w-4" /> Sửa
           </Button>
+          {!archived && (
+            <Button variant="outline" size="sm" onClick={togglePause}>
+              {project.status === 'paused' ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+              {project.status === 'paused' ? 'Tiếp tục' : 'Tạm dừng'}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={toggleArchive}>
             {archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
             {archived ? 'Kích hoạt' : 'Lưu trữ'}
@@ -676,9 +752,9 @@ export function ProjectDetailPage() {
       <ProjectForm open={formOpen} initial={project} onClose={() => setFormOpen(false)} />
       <ConfirmDialog
         open={confirmDelete}
-        title="Xóa dự án?"
-        desc={`Dự án "${project.name}" sẽ bị xóa khỏi workspace. Hành động này không thể hoàn tác.`}
-        confirmLabel="Xóa dự án"
+        title={isAdmin ? 'Xóa dự án?' : 'Gửi yêu cầu xóa dự án?'}
+        desc={isAdmin ? `Dự án "${project.name}" sẽ bị xóa khỏi workspace. Hành động này không thể hoàn tác.` : 'Yêu cầu của bạn sẽ được gửi đến admin để phê duyệt.'}
+        confirmLabel={isAdmin ? 'Xóa dự án' : 'Gửi yêu cầu'}
         onCancel={() => setConfirmDelete(false)}
         onConfirm={handleDelete}
       />
