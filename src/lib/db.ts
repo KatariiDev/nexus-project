@@ -37,6 +37,7 @@ interface DbProfile {
   email: string;
   title: string | null;
   avatar_url: string | null;
+  is_super_admin: boolean | null;
 }
 interface DbWorkspace {
   id: string;
@@ -101,6 +102,7 @@ function mapUser(p: DbProfile, role: string): User {
     title: p.title ?? '',
     role: role as WorkspaceRole,
     status: 'active',
+    isSuperAdmin: p.is_super_admin === true,
   };
 }
 
@@ -166,6 +168,26 @@ export async function fetchMyMemberships(sb: Sb, userId: string): Promise<Member
   }));
 }
 
+/** Kiểm tra tài khoản có phải Admin tổng không. */
+export async function fetchIsSuperAdmin(sb: Sb, userId: string): Promise<boolean> {
+  const { data, error } = await sb.from('profiles').select('is_super_admin').eq('id', userId).single();
+  if (error) return false;
+  return (data as { is_super_admin: boolean | null } | null)?.is_super_admin === true;
+}
+
+/** Lấy id các Admin tổng (để gửi thông báo). */
+export async function freshSuperAdminIds(sb: Sb): Promise<string[]> {
+  const { data, error } = await sb.from('profiles').select('id').eq('is_super_admin', true);
+  if (error) throw error;
+  return ((data ?? []) as { id: string }[]).map((r) => r.id);
+}
+
+/** Cấp/gỡ quyền Admin tổng — chỉ Admin tổng mới gọi được (RPC tự kiểm tra). */
+export async function setSuperAdmin(sb: Sb, targetId: string, makeAdmin: boolean): Promise<void> {
+  const { error } = await sb.rpc('set_super_admin', { target_id: targetId, make_admin: makeAdmin });
+  if (error) throw error;
+}
+
 /** Tạo workspace + profile + quyền owner cho user mới (RPC security definer). */
 export async function bootstrapWorkspace(sb: Sb, name = 'Workspace của tôi'): Promise<string> {
   const { data, error } = await sb.rpc('bootstrap_workspace', { ws_name: name });
@@ -175,6 +197,8 @@ export async function bootstrapWorkspace(sb: Sb, name = 'Workspace của tôi'):
 
 export interface WorkspaceBundle {
   workspace: Workspace;
+  /** Toàn bộ workspace (chỉ super-admin mới có nhiều hơn 1) — dùng để hiển thị nhãn. */
+  workspaces: Workspace[];
   users: User[];
   labels: Label[];
   projects: Project[];
@@ -189,10 +213,19 @@ export interface WorkspaceBundle {
   projectRequests: ProjectRequest[];
 }
 
-/** Tải toàn bộ dữ liệu của workspace sau khi đăng nhập. */
-export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: string): Promise<WorkspaceBundle> {
+/**
+ * Tải toàn bộ dữ liệu của workspace sau khi đăng nhập.
+ * Nếu là Admin tổng (isSuperAdmin) thì tải dữ liệu TẤT CẢ workspace.
+ */
+export async function loadWorkspaceData(
+  sb: Sb, userId: string, workspaceId: string, isSuperAdmin = false,
+): Promise<WorkspaceBundle> {
+  // Lọc theo workspace — bỏ qua khi là Admin tổng.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const byWs = (q: any) => (isSuperAdmin ? q : q.eq('workspace_id', workspaceId));
+
   // Lấy dự án trước để giới hạn các truy vấn con theo project_id.
-  const projectsRes = await sb.from('projects').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false });
+  const projectsRes = await byWs(sb.from('projects').select('*').order('created_at', { ascending: false }));
   if (projectsRes.error) throw projectsRes.error;
   const projectIds = (projectsRes.data as DbProject[]).map((p) => p.id);
   const projectIdFilter = projectIds.length > 0 ? projectIds : ['00000000-0000-0000-0000-000000000000'];
@@ -215,9 +248,11 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     docsRes,
     requestsRes,
   ] = await Promise.all([
-    sb.from('workspaces').select('*').eq('id', workspaceId).single(),
-    sb.from('workspace_members').select('user_id, role, profiles(id, name, email, title)').eq('workspace_id', workspaceId),
-    sb.from('labels').select('*').eq('workspace_id', workspaceId),
+    isSuperAdmin
+      ? sb.from('workspaces').select('*').order('created_at', { ascending: true })
+      : sb.from('workspaces').select('*').eq('id', workspaceId).single(),
+    byWs(sb.from('workspace_members').select('user_id, role, profiles(id, name, email, title, is_super_admin)')),
+    byWs(sb.from('labels').select('*')),
     sb.from('project_members').select('project_id, user_id').in('project_id', projectIdFilter),
     sb.from('tasks').select('*').in('project_id', projectIdFilter).order('created_at', { ascending: false }),
     sb.from('task_assignees').select('task_id, user_id'),
@@ -228,16 +263,20 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     sb.from('task_dependencies').select('*'),
     sb.from('task_attachments').select('*').order('created_at', { ascending: true }),
     sb.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(100),
-    sb.from('activity_logs').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(200),
-    sb.from('documents').select('*').eq('workspace_id', workspaceId).order('updated_at', { ascending: false }),
-    sb.from('project_requests').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(200),
+    byWs(sb.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(200)),
+    byWs(sb.from('documents').select('*').order('updated_at', { ascending: false })),
+    byWs(sb.from('project_requests').select('*').order('created_at', { ascending: false }).limit(200)),
   ]);
 
   for (const r of [wsRes, membersRes, labelsRes, projectMembersRes, tasksRes, assigneesRes, watchersRes, taskLabelsRes, commentsRes, checklistsRes, depsRes, attachmentsRes, notifsRes, logsRes, docsRes, requestsRes]) {
     if (r.error) throw r.error;
   }
 
-  const ws = wsRes.data as DbWorkspace;
+  const wsList = (isSuperAdmin
+    ? ((wsRes.data ?? []) as DbWorkspace[])
+    : [wsRes.data as DbWorkspace]
+  ).filter(Boolean);
+  const ws = wsList.find((w) => w.id === workspaceId) ?? wsList[0];
   const projectIdSet = new Set((projectsRes.data as DbProject[]).map((p) => p.id));
   const taskIds = new Set((tasksRes.data as DbTask[]).map((t) => t.id));
 
@@ -267,6 +306,19 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     .filter((m) => m.profiles)
     .map((m) => mapUser(m.profiles, m.role));
 
+  // Admin tổng: gộp trùng user (một người có thể ở nhiều workspace), giữ role cao nhất.
+  const ROLE_RANK: Record<string, number> = { viewer: 0, member: 1, manager: 2, owner: 3, admin: 4 };
+  const deduped = new Map<string, User>();
+  for (const u of users) {
+    const prev = deduped.get(u.id);
+    if (!prev) deduped.set(u.id, u);
+    else {
+      if ((ROLE_RANK[u.role] ?? 0) > (ROLE_RANK[prev.role] ?? 0)) prev.role = u.role;
+      if (u.isSuperAdmin) prev.isSuperAdmin = true;
+    }
+  }
+  const finalUsers = [...deduped.values()];
+
   // workload: suy ra từ số nhiệm vụ đang mở được giao (10 nhiệm vụ mở = 100%)
   const taskById = new Map((tasksRes.data as DbTask[]).map((t) => [t.id, t]));
   const openCount = new Map<string, number>();
@@ -274,11 +326,12 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     const t = taskById.get(taskId);
     if (t && t.status !== 'done') for (const uid of ids) openCount.set(uid, (openCount.get(uid) ?? 0) + 1);
   }
-  for (const u of users) u.workload = Math.min(100, (openCount.get(u.id) ?? 0) * 10);
+  for (const u of finalUsers) u.workload = Math.min(100, (openCount.get(u.id) ?? 0) * 10);
 
   return {
     workspace: { id: ws.id, name: ws.name, timezone: ws.timezone ?? 'Asia/Ho_Chi_Minh' },
-    users,
+    workspaces: wsList.map((w) => ({ id: w.id, name: w.name, timezone: w.timezone ?? 'Asia/Ho_Chi_Minh' })),
+    users: finalUsers,
     labels: ((labelsRes.data ?? []) as { id: string; name: string; color: string }[]).map((l) => ({
       id: l.id, name: l.name, color: l.color,
     })),
@@ -351,6 +404,8 @@ export interface PersistContext {
   workspaceId: string;
   userId: string;
   userName: string;
+  /** Admin tổng: thao tác vượt ra ngoài workspace hiện tại (RLS cho phép). */
+  isSuperAdmin: boolean;
 }
 
 /** Action sau khi làm giàu: reducer dùng thêm log/user/doc đã tạo. */
@@ -604,9 +659,12 @@ export async function persistAction(
       const log = buildLog(ctx, 'đã gửi yêu cầu', 'project', r.projectId ?? r.id, requestTitle(r));
       await insertLog(sb, ctx, log);
       // Báo cho Admin biết có yêu cầu mới cần duyệt (lấy mới từ DB để không sót khi role vừa đổi).
-      const adminIds = (await freshRoleUserIds(sb, ctx.workspaceId, ['admin'])).filter((id) => id !== ctx.userId);
-      if (adminIds.length > 0) {
-        const rows = adminIds.map((userId) => ({
+      // Gửi cho cả admin của workspace lẫn các Admin tổng (toàn hệ thống).
+      const adminIds = await freshRoleUserIds(sb, ctx.workspaceId, ['admin']);
+      const superIds = await freshSuperAdminIds(sb);
+      const notifyIds = [...new Set([...adminIds, ...superIds])].filter((id) => id !== ctx.userId);
+      if (notifyIds.length > 0) {
+        const rows = notifyIds.map((userId) => ({
           id: newId(),
           user_id: userId,
           kind: 'project',

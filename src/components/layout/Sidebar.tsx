@@ -28,7 +28,7 @@ export function Sidebar() {
   const user = useCurrentUser();
   const collapsed = state.sidebarCollapsed;
   const unread = state.notifications.filter((n) => n.userId === state.currentUserId && !n.read).length;
-  const isAdmin = canAccessAdmin(user.role);
+  const isAdmin = canAccessAdmin(user.role, user.isSuperAdmin);
   const pendingCount = state.projectRequests.filter((r) => r.status === 'pending').length;
 
   return (
@@ -108,13 +108,11 @@ export function Sidebar() {
 
       <div className="border-t p-3">
         <div className={cn('flex items-center gap-3 rounded-md p-2', collapsed && 'justify-center')}>
-          <Avatar name={user.name} avatarUrl={user.avatarUrl} size="sm" />
+          <Avatar name={user.name} size="sm" />
           {!collapsed && (
             <div className="min-w-0 flex-1 leading-tight">
               <p className="truncate text-sm font-semibold">{user.name}</p>
-              <p className="truncate text-xs font-mono text-muted-foreground">
-                {user.username}
-              </p>
+              <p className="truncate text-xs text-muted-foreground">{user.title}</p>
             </div>
           )}
         </div>
