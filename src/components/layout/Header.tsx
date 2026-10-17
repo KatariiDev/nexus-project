@@ -113,7 +113,7 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold">{user.name}</p>
             <p className="truncate text-xs font-mono text-muted-foreground">
-              {user.username ? (user.username.startsWith('@') ? user.username : `@${user.username}`) : user.email}
+              {user.username}
             </p>
           </div>
         </div>

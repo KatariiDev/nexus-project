@@ -113,7 +113,7 @@ export function Sidebar() {
             <div className="min-w-0 flex-1 leading-tight">
               <p className="truncate text-sm font-semibold">{user.name}</p>
               <p className="truncate text-xs font-mono text-muted-foreground">
-                {user.username ? (user.username.startsWith('@') ? user.username : `@${user.username}`) : (user.email ? `@${user.email.split('@')[0]}` : user.title || 'Thành viên')}
+                {user.username}
               </p>
             </div>
           )}
