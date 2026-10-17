@@ -13,8 +13,9 @@ import type { WorkspaceRole } from '../types';
 export const isAdmin = (role: WorkspaceRole): boolean => role === 'admin';
 export const isOwner = (role: WorkspaceRole): boolean => role === 'owner';
 
-/** Được duyệt yêu cầu dự án (chỉ Admin). */
-export const canReviewProjectRequests = (role: WorkspaceRole): boolean => role === 'admin';
+/** Được duyệt yêu cầu dự án (Admin trong workspace, hoặc Admin tổng). */
+export const canReviewProjectRequests = (role: WorkspaceRole, isSuperAdmin = false): boolean =>
+  isSuperAdmin || role === 'admin';
 
 /** Được gửi yêu cầu tạo/tạm dừng/xóa dự án lên Admin (Owner; Admin làm trực tiếp). */
 export const canRequestProjects = (role: WorkspaceRole): boolean =>
@@ -23,8 +24,9 @@ export const canRequestProjects = (role: WorkspaceRole): boolean =>
 /** Được tạo/tạm dừng/xóa dự án trực tiếp, không cần duyệt (chỉ Admin). */
 export const canDirectProjectAction = (role: WorkspaceRole): boolean => role === 'admin';
 
-/** Được vào khu vực /admin/* (chỉ Admin). */
-export const canAccessAdmin = (role: WorkspaceRole): boolean => role === 'admin';
+/** Được vào khu vực /admin/* (Admin trong workspace, hoặc Admin tổng toàn hệ thống). */
+export const canAccessAdmin = (role: WorkspaceRole, isSuperAdmin = false): boolean =>
+  isSuperAdmin || role === 'admin';
 
 /** Được duyệt / trả về nhiệm vụ đang chờ duyệt (Admin + Owner). */
 export const canReviewTasks = (role: WorkspaceRole): boolean =>
