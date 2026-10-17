@@ -3,7 +3,7 @@ import { Hexagon } from 'lucide-react';
 import { useApp, useCurrentUser } from './store/AppContext';
 import { canAccessAdmin } from './lib/roles';
 import { AppShell } from './components/layout/AppShell';
-import { LoginPage, RegisterPage, ForgotPasswordPage } from './features/auth/AuthPages';
+import { LoginPage, ForgotPasswordPage } from './features/auth/AuthPages';
 import { DashboardPage } from './features/dashboard/DashboardPage';
 import { ProjectsPage, ProjectDetailPage } from './features/projects/ProjectsPage';
 import { MyTasksPage, TasksPage } from './features/tasks/TasksPage';
@@ -31,26 +31,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (state.configError) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-6 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
-          <Hexagon className="h-8 w-8" />
-        </span>
-        <div>
-          <h1 className="text-xl font-bold">Chưa cấu hình Supabase</h1>
-          <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            Tạo file <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">.env</code> từ{' '}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">.env.example</code> và điền{' '}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">VITE_SUPABASE_URL</code> cùng{' '}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">VITE_SUPABASE_ANON_KEY</code> rồi chạy lại ứng dụng.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   if (!state.authed) return <Navigate to="/login" state={{ from: location }} replace />;
+
   return <>{children}</>;
 }
 
@@ -96,7 +78,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/register" element={<Navigate to="/login" replace />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
         {/* Khu vực người dùng */}

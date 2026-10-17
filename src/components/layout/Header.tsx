@@ -102,11 +102,20 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
       </button>
 
       <Dropdown
-        trigger={<button className="rounded-full"><Avatar name={user.name} size="sm" /></button>}
+        trigger={
+          <button className="rounded-full ring-2 ring-transparent transition hover:ring-primary/20 focus:outline-none">
+            <Avatar name={user.name} avatarUrl={user.avatarUrl} size="sm" />
+          </button>
+        }
       >
-        <div className="px-2.5 py-2">
-          <p className="text-sm font-semibold">{user.name}</p>
-          <p className="text-xs text-muted-foreground">{user.email}</p>
+        <div className="flex items-center gap-3 px-3 py-2.5">
+          <Avatar name={user.name} avatarUrl={user.avatarUrl} size="sm" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold">{user.name}</p>
+            <p className="truncate text-xs font-mono text-muted-foreground">
+              {user.username ? (user.username.startsWith('@') ? user.username : `@${user.username}`) : user.email}
+            </p>
+          </div>
         </div>
         <DropdownSeparator />
         <DropdownItem icon={<UserIcon className="h-4 w-4" />} label="Hồ sơ cá nhân" onClick={() => navigate('/user/settings')} />

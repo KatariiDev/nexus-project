@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { projectById, useApp, useCurrentUser, userById } from '../../store/AppContext';
 import { useUI } from '../../components/layout/UIContext';
-import type { Priority, Task, TaskStatus } from '../../types';
+import type { Priority, Task, TaskStatus, User } from '../../types';
 import { PRIORITIES, TASK_STATUSES, priorityLabel, taskStatusLabel } from '../../types';
 import { Button } from '../../components/ui/button';
 import { Badge, PriorityBadge, TaskStatusBadge } from '../../components/ui/badge';
@@ -48,9 +48,9 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const items = state.checklists.filter((c) => c.taskId === task.id);
   const doneCount = items.filter((c) => c.done).length;
   const due = dueLabel(task.dueDate, task.status);
-  const assigneeNames = task.assigneeIds
-    .map((id) => userById(state.users, id)?.name)
-    .filter((n): n is string => Boolean(n));
+  const assignees = task.assigneeIds
+    .map((id) => userById(state.users, id))
+    .filter((u): u is User => Boolean(u));
   const labels = state.labels.filter((l) => task.labelIds.includes(l.id));
 
   return (
@@ -84,8 +84,8 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
         </span>
       </div>
       <div className="mt-2.5 flex items-center justify-between gap-2">
-        {assigneeNames.length > 0 ? (
-          <AvatarStack names={assigneeNames} size="xs" />
+        {assignees.length > 0 ? (
+          <AvatarStack users={assignees} size="xs" />
         ) : (
           <span className="text-xs text-muted-foreground">Chưa giao</span>
         )}
@@ -317,9 +317,9 @@ function TaskTable({ tasks, onOpenTask }: { tasks: Task[]; onOpenTask: (id: stri
               const project = projectById(state.projects, t.projectId);
               const items = state.checklists.filter((c) => c.taskId === t.id);
               const doneItems = items.filter((c) => c.done).length;
-              const assigneeNames = t.assigneeIds
-                .map((id) => userById(state.users, id)?.name)
-                .filter((n): n is string => Boolean(n));
+              const assignees = t.assigneeIds
+                .map((id) => userById(state.users, id))
+                .filter((u): u is User => Boolean(u));
               return (
                 <tr key={t.id} onClick={() => onOpenTask(t.id)} className="cursor-pointer border-b last:border-0 hover:bg-accent/50">
                   <td className="p-3" onClick={(e) => e.stopPropagation()}>
@@ -331,7 +331,7 @@ function TaskTable({ tasks, onOpenTask }: { tasks: Task[]; onOpenTask: (id: stri
                   </td>
                   <td className="p-3 text-muted-foreground">{project?.name ?? '—'}</td>
                   <td className="p-3">
-                    {assigneeNames.length > 0 ? <AvatarStack names={assigneeNames} size="xs" /> : <span className="text-xs text-muted-foreground">—</span>}
+                    {assignees.length > 0 ? <AvatarStack users={assignees} size="xs" /> : <span className="text-xs text-muted-foreground">—</span>}
                   </td>
                   <td className="p-3"><PriorityBadge priority={t.priority} /></td>
                   <td className="p-3"><TaskStatusBadge status={t.status} /></td>

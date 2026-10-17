@@ -188,7 +188,7 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
                           checked={value.includes(u.id)}
                           onChange={() => field.onChange(value.includes(u.id) ? value.filter((x) => x !== u.id) : [...value, u.id])}
                         />
-                        <Avatar name={u.name} size="xs" />
+                        <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
                         <span className="truncate text-sm">{u.name}</span>
                       </label>
                     );

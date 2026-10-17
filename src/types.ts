@@ -11,6 +11,8 @@ export interface User {
   title: string;
   role: WorkspaceRole;
   status: 'active' | 'invited';
+  avatarUrl?: string;
+  username?: string;
   workload?: number; // 0-100 estimated capacity
 }
 

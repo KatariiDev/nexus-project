@@ -183,7 +183,7 @@ export function DocumentsPage() {
                     <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{previewOf(d.content) || 'Chưa có nội dung.'}</p>
                   </div>
                   <div className="mt-auto flex items-center gap-2 pt-1">
-                    <Avatar name={author?.name ?? '?'} size="xs" />
+                    <Avatar name={author?.name ?? '?'} avatarUrl={author?.avatarUrl} size="xs" />
                     <p className="truncate text-xs text-muted-foreground">
                       {author?.name ?? 'Không rõ'} · {timeAgo(d.updatedAt)}
                     </p>
@@ -209,10 +209,15 @@ export function DocumentsPage() {
                 {viewing.projectId && projectById(state.projects, viewing.projectId) && (
                   <Badge tone="primary">{projectById(state.projects, viewing.projectId)?.name}</Badge>
                 )}
-                <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Avatar name={userById(state.users, viewing.authorId)?.name ?? '?'} size="xs" />
-                  {userById(state.users, viewing.authorId)?.name ?? 'Không rõ'}
-                </span>
+                {(() => {
+                  const viewingAuthor = userById(state.users, viewing.authorId);
+                  return (
+                    <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Avatar name={viewingAuthor?.name ?? '?'} avatarUrl={viewingAuthor?.avatarUrl} size="xs" />
+                      {viewingAuthor?.name ?? 'Không rõ'}
+                    </span>
+                  );
+                })()}
               </div>
               <div className="whitespace-pre-line rounded-lg border bg-muted/40 p-4 text-sm leading-relaxed">
                 {viewing.content || 'Chưa có nội dung.'}

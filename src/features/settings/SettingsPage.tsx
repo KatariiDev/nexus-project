@@ -116,10 +116,12 @@ export function SettingsPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <div className="flex items-center gap-4">
-              <Avatar name={name || me.name} size="lg" className="h-20 w-20 text-xl" />
+              <Avatar name={name || me.name} avatarUrl={me.avatarUrl} size="lg" className="h-20 w-20 text-xl" />
               <div>
-                <p className="font-semibold">{name || me.name}</p>
-                <p className="text-sm text-muted-foreground">{title || me.title}</p>
+                <p className="text-base font-semibold text-foreground">{name || me.name}</p>
+                <p className="text-sm font-mono text-muted-foreground">
+                  {me.username}
+                </p>
               </div>
             </div>
             <Field label="Tên hiển thị" error={profileError}>
@@ -130,6 +132,12 @@ export function SettingsPage() {
                   if (profileError) setProfileError('');
                 }}
                 placeholder="Nhập tên của bạn…"
+              />
+            </Field>
+            <Field label="Username">
+              <Input
+                value={me.username ? (me.username.startsWith('@') ? me.username : `@${me.username}`) : (me.email ? `@${me.email.split('@')[0]}` : '')}
+                disabled
               />
             </Field>
             <Field label="Chức danh">

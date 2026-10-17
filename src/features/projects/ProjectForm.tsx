@@ -241,10 +241,10 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
             {state.users.map((u) => (
               <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
                 <Checkbox checked={form.memberIds.includes(u.id)} onChange={() => toggleMember(u.id)} />
-                <Avatar name={u.name} size="xs" />
+                <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
                 <span className="text-sm">
                   <span className="font-medium">{u.name}</span>
-                  <span className="text-muted-foreground"> · {u.title}</span>
+                  <span className="text-muted-foreground"> · {u.title || 'Thành viên'}</span>
                 </span>
               </label>
             ))}
