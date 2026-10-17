@@ -94,14 +94,6 @@ const num = (v: number | string | null | undefined): number | undefined =>
   v === null || v === undefined || v === '' ? undefined : Number(v);
 
 function mapUser(p: DbProfile, role: string): User {
-  let mappedUsername = (p as unknown as { username?: string }).username;
-  if (!mappedUsername && p.email) {
-    const prefix = p.email.split('@')[0];
-    mappedUsername = prefix.toLowerCase() === 'trantuongvan' ? '_trantuongvan' : prefix;
-  }
-  if (mappedUsername?.toLowerCase() === 'trantuongvan') {
-    mappedUsername = '_trantuongvan';
-  }
   return {
     id: p.id,
     name: p.name,
@@ -109,8 +101,6 @@ function mapUser(p: DbProfile, role: string): User {
     title: p.title ?? '',
     role: role as WorkspaceRole,
     status: 'active',
-    avatarUrl: p.avatar_url ?? undefined,
-    username: mappedUsername,
   };
 }
 
@@ -226,7 +216,7 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     requestsRes,
   ] = await Promise.all([
     sb.from('workspaces').select('*').eq('id', workspaceId).single(),
-    sb.from('workspace_members').select('user_id, role, profiles(id, name, email, title, avatar_url)').eq('workspace_id', workspaceId),
+    sb.from('workspace_members').select('user_id, role, profiles(id, name, email, title)').eq('workspace_id', workspaceId),
     sb.from('labels').select('*').eq('workspace_id', workspaceId),
     sb.from('project_members').select('project_id, user_id').in('project_id', projectIdFilter),
     sb.from('tasks').select('*').in('project_id', projectIdFilter).order('created_at', { ascending: false }),
@@ -450,6 +440,21 @@ async function syncJoin(
 
 const isConflict = (e: { code?: string }) => e.code === '23505';
 
+/**
+ * Lấy id các thành viên có vai trò cho trước — luôn đọc mới từ DB.
+ * (state.users chỉ tải một lần lúc đăng nhập nên role có thể đã cũ
+ *  nếu vừa được đổi trên Supabase.)
+ */
+async function freshRoleUserIds(sb: Sb, workspaceId: string, roles: string[]): Promise<string[]> {
+  const { data, error } = await sb
+    .from('workspace_members')
+    .select('user_id')
+    .eq('workspace_id', workspaceId)
+    .in('role', roles);
+  if (error) throw error;
+  return ((data ?? []) as { user_id: string }[]).map((r) => r.user_id);
+}
+
 async function notifyAssignees(
   sb: Sb,
   ctx: PersistContext,
@@ -479,13 +484,12 @@ async function notifyAssignees(
 async function notifyReview(
   sb: Sb,
   ctx: PersistContext,
-  users: User[],
   task: Task,
   event: 'requested' | 'approved' | 'rejected',
 ): Promise<void> {
   const targets =
     event === 'requested'
-      ? users.filter((u) => (u.role === 'owner' || u.role === 'admin') && u.id !== ctx.userId).map((u) => u.id)
+      ? (await freshRoleUserIds(sb, ctx.workspaceId, ['owner', 'admin'])).filter((id) => id !== ctx.userId)
       : task.assigneeIds.filter((id) => id !== ctx.userId);
   if (targets.length === 0) return;
   const meta = {
@@ -599,12 +603,12 @@ export async function persistAction(
       if (error) throwDb(error, 'Không gửi được yêu cầu.');
       const log = buildLog(ctx, 'đã gửi yêu cầu', 'project', r.projectId ?? r.id, requestTitle(r));
       await insertLog(sb, ctx, log);
-      // Báo cho Admin biết có yêu cầu mới cần duyệt.
-      const admins = state.users.filter((u) => u.role === 'admin' && u.id !== ctx.userId);
-      if (admins.length > 0) {
-        const rows = admins.map((u) => ({
+      // Báo cho Admin biết có yêu cầu mới cần duyệt (lấy mới từ DB để không sót khi role vừa đổi).
+      const adminIds = (await freshRoleUserIds(sb, ctx.workspaceId, ['admin'])).filter((id) => id !== ctx.userId);
+      if (adminIds.length > 0) {
+        const rows = adminIds.map((userId) => ({
           id: newId(),
-          user_id: u.id,
+          user_id: userId,
           kind: 'project',
           title: 'Yêu cầu mới cần phê duyệt',
           body: `${ctx.userName} đã gửi yêu cầu "${requestTitle(r)}".`,
@@ -741,11 +745,11 @@ export async function persistAction(
       if (statusChanged) {
         const wasReview = prev?.status === 'in_review';
         if (!wasReview && task.status === 'in_review') {
-          await notifyReview(sb, ctx, state.users, task, 'requested');
+          await notifyReview(sb, ctx, task, 'requested');
         } else if (wasReview && task.status === 'done') {
-          await notifyReview(sb, ctx, state.users, task, 'approved');
+          await notifyReview(sb, ctx, task, 'approved');
         } else if (wasReview) {
-          await notifyReview(sb, ctx, state.users, task, 'rejected');
+          await notifyReview(sb, ctx, task, 'rejected');
         }
       }
       return { ...action, task, log };
@@ -761,11 +765,11 @@ export async function persistAction(
       const log = buildLog(ctx, 'đã chuyển trạng thái', 'task', task.id, task.title);
       await insertLog(sb, ctx, log);
       if (!wasReview && action.status === 'in_review') {
-        await notifyReview(sb, ctx, state.users, task, 'requested');
+        await notifyReview(sb, ctx, task, 'requested');
       } else if (wasReview && action.status === 'done') {
-        await notifyReview(sb, ctx, state.users, task, 'approved');
+        await notifyReview(sb, ctx, task, 'approved');
       } else if (wasReview) {
-        await notifyReview(sb, ctx, state.users, task, 'rejected');
+        await notifyReview(sb, ctx, task, 'rejected');
       }
       return { ...action, log };
     }
@@ -848,7 +852,7 @@ export async function persistAction(
       // Thêm thành viên đã có tài khoản Nexus vào workspace bằng email.
       const { data: profile, error: findErr } = await sb
         .from('profiles')
-        .select('id, name, email, title, avatar_url')
+        .select('id, name, email, title')
         .eq('email', action.email.trim().toLowerCase())
         .maybeSingle();
       if (findErr) throwDb(findErr, 'Không tìm được thành viên.');
