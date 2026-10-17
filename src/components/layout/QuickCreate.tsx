@@ -6,6 +6,8 @@ import { useUI } from './UIContext';
 import { Dialog, DialogHeader, DialogBody, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Input, Textarea, Select, Field } from '../ui/input';
+import { Checkbox } from '../ui/controls';
+import { Avatar } from '../ui/avatar';
 import { Tabs } from '../ui/tabs';
 import { toast } from '../ui/toast';
 import { newId } from '../../lib/utils';
@@ -29,6 +31,10 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
   const me = useCurrentUser();
   const canDirect = canDirectProjectAction(me.role);
   const f = useForm({ name: '', code: '', description: '', status: 'planning' as string, priority: 'medium' as string, managerId: state.currentUserId, startDate: '', endDate: '' });
+  // Thành viên được chọn (mặc định có chính mình; bỏ tick để gỡ, tick để thêm).
+  const [memberIds, setMemberIds] = useState<string[]>([state.currentUserId]);
+  const toggleMember = (id: string) =>
+    setMemberIds((s) => (s.includes(id) ? s.filter((m) => m !== id) : [...s, id]));
 
   const submit = () => {
     const errs: Record<string, string> = {};
@@ -43,7 +49,8 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
       startDate: f.values.startDate || toISODate(new Date()),
       endDate: f.values.endDate || toISODate(new Date()),
       managerId: f.values.managerId,
-      memberIds: [f.values.managerId],
+      // Người quản lý luôn là thành viên; các thành viên khác do người dùng tick chọn.
+      memberIds: Array.from(new Set([...memberIds, f.values.managerId])),
       color: '#4F46E5',
     };
     if (canDirect) {
@@ -72,7 +79,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
       });
       toast('Đã gửi yêu cầu tạo dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
     }
-    f.reset(); onDone();
+    f.reset(); setMemberIds([state.currentUserId]); onDone();
   };
 
   return (
@@ -91,6 +98,20 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
         <Field label="Bắt đầu"><Input type="date" value={f.values.startDate} onChange={(e) => f.set('startDate', e.target.value)} /></Field>
         <Field label="Kết thúc"><Input type="date" value={f.values.endDate} onChange={(e) => f.set('endDate', e.target.value)} /></Field>
       </div>
+      <Field label="Thành viên">
+        <div className="max-h-36 overflow-y-auto rounded-md border border-input p-2">
+          {state.users.map((u) => (
+            <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
+              <Checkbox checked={memberIds.includes(u.id)} onChange={() => toggleMember(u.id)} />
+              <Avatar name={u.name} size="xs" />
+              <span className="text-sm">
+                <span className="font-medium">{u.name}</span>
+                {u.id === state.currentUserId && <span className="text-muted-foreground"> (bạn)</span>}
+              </span>
+            </label>
+          ))}
+        </div>
+      </Field>
       <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>{canDirect ? 'Tạo dự án' : 'Gửi yêu cầu'}</Button></DialogFooter>
     </div>
   );

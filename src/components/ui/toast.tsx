@@ -40,12 +40,16 @@ export function Toaster() {
     <div className="fixed bottom-4 right-4 z-[100] flex w-[360px] flex-col gap-2">
       {items.map((t) => (
         <div key={t.id} className={cn('flex items-start gap-3 rounded-lg border bg-card p-4 shadow-lift animate-slide-up')}>
-          {icons[t.tone]}
-          <div className="flex-1">
+          <span className="mt-0.5 shrink-0">{icons[t.tone]}</span>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold">{t.title}</p>
             {t.desc && <p className="mt-0.5 text-sm text-muted-foreground">{t.desc}</p>}
           </div>
-          <button onClick={() => setItems((s) => s.filter((x) => x.id !== t.id))} className="text-muted-foreground hover:text-foreground">
+          <button
+            onClick={() => setItems((s) => s.filter((x) => x.id !== t.id))}
+            aria-label="Đóng thông báo"
+            className="-mr-1.5 -mt-1.5 shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
