@@ -336,6 +336,8 @@ interface AppContextValue {
   signOut: () => Promise<void>;
   /** Tải lại toàn bộ dữ liệu workspace từ Supabase (dùng cho nút tải lại / realtime). */
   refresh: () => Promise<void>;
+  /** Đăng nhập chế độ dev (khi chưa cấu hình Supabase) — LoginPage gọi khi authService trả về isDev. */
+  loginDev?: (email: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);

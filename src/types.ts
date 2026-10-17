@@ -14,6 +14,10 @@ export interface User {
   workload?: number; // 0-100 estimated capacity
   /** Admin tổng: quản lý tất cả workspace (vượt ra ngoài role trong từng workspace). */
   isSuperAdmin: boolean;
+  /** Ảnh đại diện (dùng ở một số trang từ PR #12). */
+  avatarUrl?: string;
+  /** Tên đăng nhập hiển thị (dùng ở SettingsPage từ PR #12). */
+  username?: string;
 }
 
 export interface Workspace {
