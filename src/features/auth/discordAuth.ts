@@ -306,6 +306,19 @@ export async function fetchDiscordGuildMember(
           sessionStorage.setItem('nexus_discord_server_name', serverNick);
           localStorage.setItem('nexus_discord_server_name', serverNick);
         }
+
+        const discordId = member.user?.id;
+        if (member.avatar && discordId) {
+          const ext = member.avatar.startsWith('a_') ? 'gif' : 'png';
+          const serverAvatarUrl = `https://cdn.discordapp.com/guilds/${guildId}/users/${discordId}/avatars/${member.avatar}.${ext}?size=256`;
+          sessionStorage.setItem('nexus_discord_avatar_url', serverAvatarUrl);
+          localStorage.setItem('nexus_discord_avatar_url', serverAvatarUrl);
+        } else if (member.user?.avatar && discordId) {
+          const ext = member.user.avatar.startsWith('a_') ? 'gif' : 'png';
+          const globalAvatarUrl = `https://cdn.discordapp.com/avatars/${discordId}/${member.user.avatar}.${ext}?size=256`;
+          sessionStorage.setItem('nexus_discord_avatar_url', globalAvatarUrl);
+          localStorage.setItem('nexus_discord_avatar_url', globalAvatarUrl);
+        }
       } catch { /* ignore */ }
 
       return member;
@@ -449,9 +462,11 @@ export function getDiscordAvatarUrl(
 
   // 1. Kiểm tra Guild Avatar riêng trong Server BCN
   let serverAvatarHash = guildMember?.avatar;
-  if (!serverAvatarHash && guildId && typeof sessionStorage !== 'undefined') {
+  if (!serverAvatarHash && guildId) {
     try {
-      const saved = sessionStorage.getItem(`nexus_discord_member_${guildId}`);
+      const saved =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem(`nexus_discord_member_${guildId}`) : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`nexus_discord_member_${guildId}`) : null);
       if (saved) {
         const parsed: DiscordGuildMember = JSON.parse(saved);
         if (parsed.avatar) serverAvatarHash = parsed.avatar;
@@ -497,6 +512,14 @@ export function getDiscordAvatarUrl(
     const ext = avatarHash.startsWith('a_') ? 'gif' : 'png';
     return `https://cdn.discordapp.com/avatars/${discordId}/${avatarHash}.${ext}?size=256`;
   }
+
+  // 4. Kiểm tra cache avatar URL đã lưu trong storage
+  try {
+    const cachedUrl =
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('nexus_discord_avatar_url') : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('nexus_discord_avatar_url') : null);
+    if (cachedUrl && cachedUrl.trim()) return cachedUrl.trim();
+  } catch { /* ignore */ }
 
   return undefined;
 }
@@ -689,15 +712,34 @@ export async function syncDiscordProfile(
   }
 
   // Tên hiển thị: ưu tiên tuyệt đối tên trong server BCN (guildMember.nick)
-  const name =
-    (guildMember && typeof guildMember.nick === 'string' && guildMember.nick.trim())
-      ? guildMember.nick.trim()
-      : getDiscordDisplayName(user, guildMember);
+  const serverNick = guildMember?.nick?.trim();
+  let name: string;
+  if (serverNick) {
+    name = serverNick;
+  } else {
+    // Nếu chưa lấy được serverNick ở lượt này, kiểm tra xem storage đã có serverNick chưa
+    const savedServerName =
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('nexus_discord_server_name') : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('nexus_discord_server_name') : null);
+    if (savedServerName && savedServerName.trim()) {
+      name = savedServerName.trim();
+    } else {
+      name = getDiscordDisplayName(user, guildMember);
+    }
+  }
 
   let avatarUrl = getDiscordAvatarUrl(user, guildMember);
   if (!avatarUrl && directUser?.avatar && directUser.id) {
     const ext = directUser.avatar.startsWith('a_') ? 'gif' : 'png';
     avatarUrl = `https://cdn.discordapp.com/avatars/${directUser.id}/${directUser.avatar}.${ext}?size=256`;
+  }
+  if (!avatarUrl) {
+    try {
+      const savedAvatar =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem('nexus_discord_avatar_url') : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('nexus_discord_avatar_url') : null);
+      if (savedAvatar) avatarUrl = savedAvatar;
+    } catch { /* ignore */ }
   }
 
   let username = getDiscordUsername(user, guildMember, directUser);
@@ -708,8 +750,22 @@ export async function syncDiscordProfile(
   try {
     localStorage.setItem('nexus_discord_username', username);
     sessionStorage.setItem('nexus_discord_username', username);
-    localStorage.setItem('nexus_discord_server_name', name);
-    sessionStorage.setItem('nexus_discord_server_name', name);
+    if (serverNick) {
+      localStorage.setItem('nexus_discord_server_name', serverNick);
+      sessionStorage.setItem('nexus_discord_server_name', serverNick);
+    } else if (name) {
+      const existing =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem('nexus_discord_server_name') : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('nexus_discord_server_name') : null);
+      if (!existing) {
+        localStorage.setItem('nexus_discord_server_name', name);
+        sessionStorage.setItem('nexus_discord_server_name', name);
+      }
+    }
+    if (avatarUrl) {
+      localStorage.setItem('nexus_discord_avatar_url', avatarUrl);
+      sessionStorage.setItem('nexus_discord_avatar_url', avatarUrl);
+    }
   } catch { /* ignore */ }
 
   try {

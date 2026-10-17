@@ -371,14 +371,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem(WORKSPACE_KEY, active.workspaceId);
     } catch { /* ignore */ }
 
-    // Đồng bộ tên hiển thị & username Discord vào user hiện tại trong bundle.users
+    // Đồng bộ tên hiển thị & avatar Discord vào user hiện tại trong bundle.users
     let discordUsername: string | null = null;
     let discordServerName: string | null = null;
+    let discordAvatarUrl: string | null = null;
     try {
       discordUsername =
         localStorage.getItem('nexus_discord_username') || sessionStorage.getItem('nexus_discord_username');
       discordServerName =
         localStorage.getItem('nexus_discord_server_name') || sessionStorage.getItem('nexus_discord_server_name');
+      discordAvatarUrl =
+        localStorage.getItem('nexus_discord_avatar_url') || sessionStorage.getItem('nexus_discord_avatar_url');
     } catch { /* ignore */ }
     const finalName = discordServerName || userName;
     bundle.users = bundle.users.map((u) => {
@@ -390,6 +393,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ...u,
           name: finalName || u.name,
           username: cleanUsername,
+          avatarUrl: discordAvatarUrl || u.avatarUrl,
         };
       }
       return u;
@@ -398,12 +402,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     baseDispatch({ type: 'HYDRATE', bundle, userId });
   }, []);
 
-  /** Tải lại toàn bộ dữ liệu workspace (giữ nguyên theme/sidebar). */
+  /** Tải lại toàn bộ dữ liệu workspace (giữ nguyên theme/sidebar và dữ liệu Discord profile). */
   const refresh = useCallback(async () => {
     const ctx = ctxRef.current;
     if (!ctx) return;
     const sb = getSupabase();
     const bundle = await loadWorkspaceData(sb, ctx.userId, ctx.workspaceId);
+
+    // Đồng bộ tên hiển thị & avatar Discord vào user hiện tại trong bundle.users
+    let discordUsername: string | null = null;
+    let discordServerName: string | null = null;
+    let discordAvatarUrl: string | null = null;
+    try {
+      discordUsername =
+        localStorage.getItem('nexus_discord_username') || sessionStorage.getItem('nexus_discord_username');
+      discordServerName =
+        localStorage.getItem('nexus_discord_server_name') || sessionStorage.getItem('nexus_discord_server_name');
+      discordAvatarUrl =
+        localStorage.getItem('nexus_discord_avatar_url') || sessionStorage.getItem('nexus_discord_avatar_url');
+    } catch { /* ignore */ }
+    const finalName = discordServerName || ctx.userName;
+    bundle.users = bundle.users.map((u) => {
+      if (u.id === ctx.userId) {
+        const cleanUsername = discordUsername
+          ? (discordUsername.toLowerCase() === 'trantuongvan' ? '_trantuongvan' : discordUsername)
+          : u.username;
+        return {
+          ...u,
+          name: finalName || u.name,
+          username: cleanUsername,
+          avatarUrl: discordAvatarUrl || u.avatarUrl,
+        };
+      }
+      return u;
+    });
+
     baseDispatch({ type: 'HYDRATE', bundle, userId: ctx.userId });
   }, []);
 
@@ -714,6 +747,7 @@ export function useCurrentUser(): User {
   const found = state.users.find((u) => u.id === state.currentUserId);
   let cachedUsername: string | undefined;
   let cachedServerName: string | undefined;
+  let cachedAvatarUrl: string | undefined;
   if (typeof localStorage !== 'undefined') {
     try {
       cachedUsername =
@@ -723,6 +757,10 @@ export function useCurrentUser(): User {
       cachedServerName =
         localStorage.getItem('nexus_discord_server_name') ||
         sessionStorage.getItem('nexus_discord_server_name') ||
+        undefined;
+      cachedAvatarUrl =
+        localStorage.getItem('nexus_discord_avatar_url') ||
+        sessionStorage.getItem('nexus_discord_avatar_url') ||
         undefined;
     } catch { /* ignore */ }
   }
@@ -738,12 +776,14 @@ export function useCurrentUser(): User {
   }
 
   const resolvedName = cachedServerName || found?.name || '—';
+  const resolvedAvatarUrl = cachedAvatarUrl || found?.avatarUrl;
 
   if (found) {
     return {
       ...found,
       name: resolvedName,
       username: resolvedUsername,
+      avatarUrl: resolvedAvatarUrl,
     };
   }
 
@@ -755,6 +795,7 @@ export function useCurrentUser(): User {
     role: 'member',
     status: 'active',
     username: resolvedUsername,
+    avatarUrl: resolvedAvatarUrl,
   };
 }
 

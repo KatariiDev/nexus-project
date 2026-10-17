@@ -94,6 +94,14 @@ const num = (v: number | string | null | undefined): number | undefined =>
   v === null || v === undefined || v === '' ? undefined : Number(v);
 
 function mapUser(p: DbProfile, role: string): User {
+  let mappedUsername = (p as unknown as { username?: string }).username;
+  if (!mappedUsername && p.email) {
+    const prefix = p.email.split('@')[0];
+    mappedUsername = prefix.toLowerCase() === 'trantuongvan' ? '_trantuongvan' : prefix;
+  }
+  if (mappedUsername?.toLowerCase() === 'trantuongvan') {
+    mappedUsername = '_trantuongvan';
+  }
   return {
     id: p.id,
     name: p.name,
@@ -101,6 +109,8 @@ function mapUser(p: DbProfile, role: string): User {
     title: p.title ?? '',
     role: role as WorkspaceRole,
     status: 'active',
+    avatarUrl: p.avatar_url ?? undefined,
+    username: mappedUsername,
   };
 }
 
@@ -216,7 +226,7 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     requestsRes,
   ] = await Promise.all([
     sb.from('workspaces').select('*').eq('id', workspaceId).single(),
-    sb.from('workspace_members').select('user_id, role, profiles(id, name, email, title)').eq('workspace_id', workspaceId),
+    sb.from('workspace_members').select('user_id, role, profiles(id, name, email, title, avatar_url)').eq('workspace_id', workspaceId),
     sb.from('labels').select('*').eq('workspace_id', workspaceId),
     sb.from('project_members').select('project_id, user_id').in('project_id', projectIdFilter),
     sb.from('tasks').select('*').in('project_id', projectIdFilter).order('created_at', { ascending: false }),
@@ -852,7 +862,7 @@ export async function persistAction(
       // Thêm thành viên đã có tài khoản Nexus vào workspace bằng email.
       const { data: profile, error: findErr } = await sb
         .from('profiles')
-        .select('id, name, email, title')
+        .select('id, name, email, title, avatar_url')
         .eq('email', action.email.trim().toLowerCase())
         .maybeSingle();
       if (findErr) throwDb(findErr, 'Không tìm được thành viên.');
