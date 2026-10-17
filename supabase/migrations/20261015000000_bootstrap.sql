@@ -29,7 +29,7 @@ begin
     coalesce(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', null)
   )
   on conflict (id) do update set
-    name = coalesce(nullif(excluded.name, ''), public.profiles.name),
+    name = case when public.profiles.name in ('Thành viên', '') or public.profiles.name is null then excluded.name else public.profiles.name end,
     email = excluded.email,
     avatar_url = coalesce(excluded.avatar_url, public.profiles.avatar_url);
   return new;

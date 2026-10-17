@@ -171,6 +171,51 @@ export interface DiscordGuildMember {
   };
 }
 
+export function extractStoredProviderToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  // 1. Kiểm tra URL hash (ngay sau khi Discord redirect về)
+  if (window.location.hash) {
+    try {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const pt = params.get('provider_token');
+      if (pt) return pt;
+    } catch { /* ignore */ }
+  }
+  // 2. Kiểm tra sessionStorage
+  try {
+    const s = sessionStorage.getItem('nexus_discord_provider_token');
+    if (s) return s;
+  } catch { /* ignore */ }
+  // 3. Kiểm tra localStorage
+  try {
+    const l = localStorage.getItem('nexus_discord_provider_token');
+    if (l) return l;
+  } catch { /* ignore */ }
+  // 4. Kiểm tra Supabase Auth Session lưu trong localStorage
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const val = localStorage.getItem(key);
+        if (val) {
+          const parsed = JSON.parse(val);
+          if (parsed && typeof parsed.provider_token === 'string' && parsed.provider_token) {
+            return parsed.provider_token;
+          }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export function persistProviderToken(token: string) {
+  try {
+    sessionStorage.setItem('nexus_discord_provider_token', token);
+    localStorage.setItem('nexus_discord_provider_token', token);
+  } catch { /* ignore */ }
+}
+
 const memberCheckCache = new Map<string, { member: DiscordGuildMember | null; timestamp: number }>();
 let inFlightMemberFetch: Promise<DiscordGuildMember | null> | null = null;
 
@@ -182,22 +227,26 @@ export async function fetchDiscordGuildMember(
   providerToken?: string | null,
   targetGuildId?: string,
 ): Promise<DiscordGuildMember | null> {
-  const guildId = (targetGuildId || TARGET_DISCORD_GUILD_ID)?.trim();
+  const guildId = (targetGuildId || TARGET_DISCORD_GUILD_ID || '1337249537072435281')?.trim();
   if (!guildId) return null;
 
-  // Nếu không có token, thử đọc từ cache trong sessionStorage
-  if (!providerToken) {
-    if (typeof sessionStorage !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem(`nexus_discord_member_${guildId}`);
-        if (saved) return JSON.parse(saved) as DiscordGuildMember;
-      } catch { /* ignore */ }
-    }
+  const token = providerToken || extractStoredProviderToken();
+
+  // Nếu không có token, thử đọc từ cache trong localStorage và sessionStorage
+  if (!token) {
+    try {
+      const saved =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem(`nexus_discord_member_${guildId}`) : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`nexus_discord_member_${guildId}`) : null);
+      if (saved) return JSON.parse(saved) as DiscordGuildMember;
+    } catch { /* ignore */ }
     return null;
   }
 
+  persistProviderToken(token);
+
   // 1. Kiểm tra cache bộ nhớ (5 phút)
-  const cached = memberCheckCache.get(`${guildId}_${providerToken}`);
+  const cached = memberCheckCache.get(`${guildId}_${token}`);
   if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
     return cached.member;
   }
@@ -211,7 +260,7 @@ export async function fetchDiscordGuildMember(
     try {
       let response = await fetch(`https://discord.com/api/v10/users/@me/guilds/${guildId}/member`, {
         headers: {
-          Authorization: `Bearer ${providerToken}`,
+          Authorization: `Bearer ${token}`,
         },
       });
 
@@ -225,7 +274,7 @@ export async function fetchDiscordGuildMember(
 
         response = await fetch(`https://discord.com/api/v10/users/@me/guilds/${guildId}/member`, {
           headers: {
-            Authorization: `Bearer ${providerToken}`,
+            Authorization: `Bearer ${token}`,
           },
         });
       }
@@ -234,32 +283,40 @@ export async function fetchDiscordGuildMember(
         console.warn(
           `Không thể lấy thông tin member trong guild ${guildId} (HTTP ${response.status}). Có thể cần đăng xuất và đăng nhập lại để cấp scope "guilds.members.read".`,
         );
-        // Thử lấy lại từ sessionStorage nếu có bản lưu trước
-        if (typeof sessionStorage !== 'undefined') {
-          try {
-            const saved = sessionStorage.getItem(`nexus_discord_member_${guildId}`);
-            if (saved) return JSON.parse(saved) as DiscordGuildMember;
-          } catch { /* ignore */ }
-        }
+        // Thử lấy lại từ storage nếu có bản lưu trước
+        try {
+          const saved =
+            (typeof localStorage !== 'undefined' ? localStorage.getItem(`nexus_discord_member_${guildId}`) : null) ||
+            (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`nexus_discord_member_${guildId}`) : null);
+          if (saved) return JSON.parse(saved) as DiscordGuildMember;
+        } catch { /* ignore */ }
         return null;
       }
 
       const member: DiscordGuildMember = await response.json();
-      memberCheckCache.set(`${guildId}_${providerToken}`, { member, timestamp: Date.now() });
-      if (typeof sessionStorage !== 'undefined') {
-        try {
-          sessionStorage.setItem(`nexus_discord_member_${guildId}`, JSON.stringify(member));
-        } catch { /* ignore */ }
-      }
+      memberCheckCache.set(`${guildId}_${token}`, { member, timestamp: Date.now() });
+
+      try {
+        const serialized = JSON.stringify(member);
+        sessionStorage.setItem(`nexus_discord_member_${guildId}`, serialized);
+        localStorage.setItem(`nexus_discord_member_${guildId}`, serialized);
+
+        const serverNick = member.nick?.trim();
+        if (serverNick) {
+          sessionStorage.setItem('nexus_discord_server_name', serverNick);
+          localStorage.setItem('nexus_discord_server_name', serverNick);
+        }
+      } catch { /* ignore */ }
+
       return member;
     } catch (err) {
       console.warn('Lỗi khi fetchDiscordGuildMember:', err);
-      if (typeof sessionStorage !== 'undefined') {
-        try {
-          const saved = sessionStorage.getItem(`nexus_discord_member_${guildId}`);
-          if (saved) return JSON.parse(saved) as DiscordGuildMember;
-        } catch { /* ignore */ }
-      }
+      try {
+        const saved =
+          (typeof localStorage !== 'undefined' ? localStorage.getItem(`nexus_discord_member_${guildId}`) : null) ||
+          (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`nexus_discord_member_${guildId}`) : null);
+        if (saved) return JSON.parse(saved) as DiscordGuildMember;
+      } catch { /* ignore */ }
       return null;
     } finally {
       inFlightMemberFetch = null;
@@ -273,11 +330,12 @@ export async function fetchDiscordGuildMember(
  * Lấy tên hiển thị phù hợp nhất từ thông tin người dùng Discord.
  * Thứ tự ưu tiên:
  * 1. Tên riêng (nickname) trong server Discord BCN (guildMember.nick)
- * 2. Tên hiển thị toàn cầu Discord (global_name)
- * 3. Họ tên (full_name / name)
- * 4. Discord username (preferred_username / user_name / username)
- * 5. Email username (phần trước @)
- * 6. Mặc định: 'Thành viên'
+ * 2. Tên server BCN đã lưu trong localStorage / sessionStorage (nexus_discord_server_name)
+ * 3. Tên từ cache guild member trong storage
+ * 4. Fallback (khi chưa hoặc không có nickname trong BCN): Tên hiển thị toàn cầu Discord (global_name) / Họ tên
+ * 5. Discord username
+ * 6. Email username (phần trước @)
+ * 7. Mặc định: 'Thành viên'
  */
 export function getDiscordDisplayName(
   user: {
@@ -287,26 +345,48 @@ export function getDiscordDisplayName(
   },
   guildMember?: DiscordGuildMember | null,
 ): string {
-  // 1. Ưu tiên cao nhất: Tên riêng (nickname) trong server BCN
+  // 1. Ưu tiên cao nhất: Tên riêng (nickname) trong server BCN từ guildMember
   if (guildMember && typeof guildMember.nick === 'string' && guildMember.nick.trim()) {
-    return guildMember.nick.trim();
+    const nick = guildMember.nick.trim();
+    try {
+      localStorage.setItem('nexus_discord_server_name', nick);
+      sessionStorage.setItem('nexus_discord_server_name', nick);
+    } catch { /* ignore */ }
+    return nick;
   }
 
-  // Thử đọc từ cache sessionStorage nếu chưa truyền guildMember
-  const guildId = TARGET_DISCORD_GUILD_ID?.trim();
-  if (guildId && typeof sessionStorage !== 'undefined') {
+  // 2. Kiểm tra cache tên server BCN đã lưu trong localStorage hoặc sessionStorage
+  try {
+    const cachedServerName =
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('nexus_discord_server_name') : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('nexus_discord_server_name') : null);
+    if (cachedServerName && cachedServerName.trim()) {
+      return cachedServerName.trim();
+    }
+  } catch { /* ignore */ }
+
+  // 3. Thử đọc từ member cache trong storage
+  const guildId = (TARGET_DISCORD_GUILD_ID || '1337249537072435281')?.trim();
+  if (guildId) {
     try {
-      const saved = sessionStorage.getItem(`nexus_discord_member_${guildId}`);
+      const saved =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem(`nexus_discord_member_${guildId}`) : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`nexus_discord_member_${guildId}`) : null);
       if (saved) {
         const parsed: DiscordGuildMember = JSON.parse(saved);
         if (typeof parsed.nick === 'string' && parsed.nick.trim()) {
-          return parsed.nick.trim();
+          const nick = parsed.nick.trim();
+          try {
+            localStorage.setItem('nexus_discord_server_name', nick);
+            sessionStorage.setItem('nexus_discord_server_name', nick);
+          } catch { /* ignore */ }
+          return nick;
         }
       }
     } catch { /* ignore */ }
   }
 
-  // 2. Fallback: Tên hiển thị toàn cầu Discord hoặc họ tên
+  // 4. Fallback cuối cùng nếu không tìm thấy tên trong server BCN: Tên hiển thị toàn cầu Discord hoặc họ tên
   const meta = user.user_metadata || {};
   const customClaims = meta.custom_claims as Record<string, unknown> | undefined;
   const discordIdentity = user.identities?.find((id) => id.provider === 'discord');
@@ -593,9 +673,7 @@ export async function syncDiscordProfile(
   },
   providerToken?: string | null,
 ): Promise<{ name: string; avatarUrl?: string; username: string }> {
-  const tokenToUse =
-    providerToken ||
-    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('nexus_discord_provider_token') : null);
+  const tokenToUse = providerToken || extractStoredProviderToken();
 
   let guildMember: DiscordGuildMember | null = null;
   let directUser: DiscordCurrentUser | null = null;
@@ -610,7 +688,12 @@ export async function syncDiscordProfile(
     directUser = await fetchDiscordCurrentUser(null);
   }
 
-  const name = getDiscordDisplayName(user, guildMember);
+  // Tên hiển thị: ưu tiên tuyệt đối tên trong server BCN (guildMember.nick)
+  const name =
+    (guildMember && typeof guildMember.nick === 'string' && guildMember.nick.trim())
+      ? guildMember.nick.trim()
+      : getDiscordDisplayName(user, guildMember);
+
   let avatarUrl = getDiscordAvatarUrl(user, guildMember);
   if (!avatarUrl && directUser?.avatar && directUser.id) {
     const ext = directUser.avatar.startsWith('a_') ? 'gif' : 'png';
@@ -622,16 +705,12 @@ export async function syncDiscordProfile(
     username = '_trantuongvan';
   }
 
-  if (typeof localStorage !== 'undefined') {
-    try {
-      localStorage.setItem('nexus_discord_username', username);
-    } catch { /* ignore */ }
-  }
-  if (typeof sessionStorage !== 'undefined') {
-    try {
-      sessionStorage.setItem('nexus_discord_username', username);
-    } catch { /* ignore */ }
-  }
+  try {
+    localStorage.setItem('nexus_discord_username', username);
+    sessionStorage.setItem('nexus_discord_username', username);
+    localStorage.setItem('nexus_discord_server_name', name);
+    sessionStorage.setItem('nexus_discord_server_name', name);
+  } catch { /* ignore */ }
 
   try {
     const payload: { id: string; name: string; email: string; avatar_url?: string; updated_at: string } = {
@@ -644,9 +723,13 @@ export async function syncDiscordProfile(
       payload.avatar_url = avatarUrl;
     }
 
-    const { error } = await sb.from('profiles').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Lỗi upsert profiles từ Discord metadata:', error.message);
+    const { error: upsertErr } = await sb.from('profiles').upsert(payload, { onConflict: 'id' });
+    if (upsertErr) {
+      // Thử dùng update nếu upsert bị trigger cản
+      await sb
+        .from('profiles')
+        .update({ name, ...(avatarUrl ? { avatar_url: avatarUrl } : {}), updated_at: new Date().toISOString() })
+        .eq('id', user.id);
     }
   } catch (err) {
     console.warn('Không thể đồng bộ hồ sơ Discord:', err);

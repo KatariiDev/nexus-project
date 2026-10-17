@@ -24,6 +24,8 @@ import {
   verifyDiscordGuildMembership,
   getDiscordDisplayName,
   syncDiscordProfile,
+  extractStoredProviderToken,
+  persistProviderToken,
 } from '../features/auth/discordAuth';
 import { toast } from '../components/ui/toast';
 import {
@@ -367,15 +369,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem(WORKSPACE_KEY, active.workspaceId);
     } catch { /* ignore */ }
 
-    // Đồng bộ username Discord vào user hiện tại trong bundle.users
+    // Đồng bộ tên hiển thị & username Discord vào user hiện tại trong bundle.users
     let discordUsername: string | null = null;
+    let discordServerName: string | null = null;
     try {
-      discordUsername = localStorage.getItem('nexus_discord_username') || sessionStorage.getItem('nexus_discord_username');
+      discordUsername =
+        localStorage.getItem('nexus_discord_username') || sessionStorage.getItem('nexus_discord_username');
+      discordServerName =
+        localStorage.getItem('nexus_discord_server_name') || sessionStorage.getItem('nexus_discord_server_name');
     } catch { /* ignore */ }
-    if (discordUsername) {
-      const cleanUsername = discordUsername.toLowerCase() === 'trantuongvan' ? '_trantuongvan' : discordUsername;
-      bundle.users = bundle.users.map((u) => (u.id === userId ? { ...u, username: cleanUsername } : u));
-    }
+    const finalName = discordServerName || userName;
+    bundle.users = bundle.users.map((u) => {
+      if (u.id === userId) {
+        const cleanUsername = discordUsername
+          ? (discordUsername.toLowerCase() === 'trantuongvan' ? '_trantuongvan' : discordUsername)
+          : u.username;
+        return {
+          ...u,
+          name: finalName || u.name,
+          username: cleanUsername,
+        };
+      }
+      return u;
+    });
 
     baseDispatch({ type: 'HYDRATE', bundle, userId });
   }, []);
@@ -433,12 +449,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (!isDiscordUser) return true;
 
-      let providerToken = session.provider_token;
-      if (!providerToken && typeof window !== 'undefined' && window.location.hash) {
-        try {
-          const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-          providerToken = params.get('provider_token');
-        } catch { /* ignore */ }
+      let providerToken = session.provider_token || extractStoredProviderToken();
+      if (providerToken) {
+        persistProviderToken(providerToken);
       }
 
       if (providerToken) {
@@ -484,21 +497,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       isProcessing = true;
       try {
-        let providerToken = session.provider_token;
-        if (!providerToken && typeof window !== 'undefined' && window.location.hash) {
-          try {
-            const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-            providerToken = params.get('provider_token');
-          } catch { /* ignore */ }
-        }
-        if (providerToken && typeof sessionStorage !== 'undefined') {
-          try {
-            sessionStorage.setItem('nexus_discord_provider_token', providerToken);
-          } catch { /* ignore */ }
-        } else if (!providerToken && typeof sessionStorage !== 'undefined') {
-          try {
-            providerToken = sessionStorage.getItem('nexus_discord_provider_token');
-          } catch { /* ignore */ }
+        let providerToken = session.provider_token || extractStoredProviderToken();
+        if (providerToken) {
+          persistProviderToken(providerToken);
         }
 
         const allowed = await checkDiscordGatekeeper(session);
@@ -703,11 +704,16 @@ export function useCurrentUser(): User {
   const { state } = useApp();
   const found = state.users.find((u) => u.id === state.currentUserId);
   let cachedUsername: string | undefined;
+  let cachedServerName: string | undefined;
   if (typeof localStorage !== 'undefined') {
     try {
       cachedUsername =
         localStorage.getItem('nexus_discord_username') ||
         sessionStorage.getItem('nexus_discord_username') ||
+        undefined;
+      cachedServerName =
+        localStorage.getItem('nexus_discord_server_name') ||
+        sessionStorage.getItem('nexus_discord_server_name') ||
         undefined;
     } catch { /* ignore */ }
   }
@@ -722,16 +728,19 @@ export function useCurrentUser(): User {
     resolvedUsername = '_trantuongvan';
   }
 
+  const resolvedName = cachedServerName || found?.name || '—';
+
   if (found) {
     return {
       ...found,
+      name: resolvedName,
       username: resolvedUsername,
     };
   }
 
   return {
     id: state.currentUserId,
-    name: '—',
+    name: resolvedName,
     email: '',
     title: '',
     role: 'member',
