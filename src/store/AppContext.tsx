@@ -511,12 +511,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const { data: { session }, error } = await sb.auth.getSession();
         if (error) throw error;
         if (cancelled) return;
-        if (!session) {
-          baseDispatch({ type: 'BOOT_DONE' });
-          return;
-        }
-        loadedRef.current = true;
-        await loadForUser(session.user.id, session.user.user_metadata?.name ?? session.user.email ?? 'Thành viên');
+        await processSession(session);
       } catch (e) {
         console.error('Không tải được dữ liệu:', e);
         if (!cancelled) baseDispatch({ type: 'BOOT_DONE' });
@@ -529,14 +524,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         loadedRef.current = false;
         ctxRef.current = null;
         baseDispatch({ type: 'SESSION_END' });
-      } else if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && !loadedRef.current) {
-        loadedRef.current = true;
-        try {
-          await loadForUser(session.user.id, session.user.user_metadata?.name ?? session.user.email ?? 'Thành viên');
-        } catch (e) {
-          console.error('Không tải được dữ liệu:', e);
-          baseDispatch({ type: 'BOOT_DONE' });
-        }
+      } else if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+        await processSession(session);
       }
     });
 
@@ -702,8 +691,9 @@ function assertMemberPermission(state: AppState, action: Action): void {
   }, []);
 
   const loginDev = useCallback(async (email: string) => {
-    const mock = createMockWorkspaceBundle(email);
-    baseDispatch({ type: 'HYDRATE', bundle: mock.bundle, userId: mock.userId });
+    const bundle = createMockWorkspaceBundle(email);
+    const userId = bundle.users[0]?.id || 'usr-admin-01';
+    baseDispatch({ type: 'HYDRATE', bundle, userId });
   }, []);
 
   const value = useMemo(
