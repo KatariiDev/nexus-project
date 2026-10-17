@@ -19,12 +19,6 @@ import {
   type PersistContext,
   type WorkspaceBundle,
 } from '../lib/db';
-import { createMockWorkspaceBundle } from '../features/auth/mockData';
-import {
-  verifyDiscordGuildMembership,
-  getDiscordDisplayName,
-  syncDiscordProfile,
-} from '../features/auth/discordAuth';
 import { toast } from '../components/ui/toast';
 import {
   assignableRoles,
@@ -335,7 +329,8 @@ interface AppContextValue {
   state: AppState;
   dispatch: (action: Action) => Promise<void>;
   signOut: () => Promise<void>;
-  loginDev: (nameOrEmail?: string) => void;
+  /** Tải lại toàn bộ dữ liệu workspace từ Supabase (dùng cho nút tải lại / realtime). */
+  refresh: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -366,170 +361,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem(WORKSPACE_KEY, active.workspaceId);
     } catch { /* ignore */ }
-
-    // Đồng bộ username Discord vào user hiện tại trong bundle.users
-    let discordUsername: string | null = null;
-    try {
-      discordUsername = localStorage.getItem('nexus_discord_username') || sessionStorage.getItem('nexus_discord_username');
-    } catch { /* ignore */ }
-    if (discordUsername) {
-      const cleanUsername = discordUsername.toLowerCase() === 'trantuongvan' ? '_trantuongvan' : discordUsername;
-      bundle.users = bundle.users.map((u) => (u.id === userId ? { ...u, username: cleanUsername } : u));
-    }
-
     baseDispatch({ type: 'HYDRATE', bundle, userId });
   }, []);
 
-  /** Đăng nhập ở chế độ nội bộ / xem trước khi chưa kết nối Supabase */
-  const loginDev = useCallback((nameOrEmail = 'Dev Admin') => {
-    const isEmail = nameOrEmail.includes('@');
-    const name = isEmail ? nameOrEmail.split('@')[0] : nameOrEmail;
-    const email = isEmail ? nameOrEmail : `${name.toLowerCase()}@nexus.internal`;
-    const bundle = createMockWorkspaceBundle(name, email);
-    const userId = bundle.users[0].id;
-    try {
-      localStorage.setItem('nexus-dev-session', JSON.stringify({ name, email }));
-    } catch { /* ignore */ }
-    ctxRef.current = { workspaceId: bundle.workspace.id, userId, userName: name };
-    baseDispatch({ type: 'HYDRATE', bundle, userId });
+  /** Tải lại toàn bộ dữ liệu workspace (giữ nguyên theme/sidebar). */
+  const refresh = useCallback(async () => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const sb = getSupabase();
+    const bundle = await loadWorkspaceData(sb, ctx.userId, ctx.workspaceId);
+    baseDispatch({ type: 'HYDRATE', bundle, userId: ctx.userId });
   }, []);
 
   // Khởi tạo session + lắng nghe thay đổi auth
   useEffect(() => {
-    // Kiểm tra xem có phiên đăng nhập xem trước nội bộ được lưu không
-    let devSession: { name: string; email: string } | null = null;
-    try {
-      const saved = localStorage.getItem('nexus-dev-session');
-      if (saved) devSession = JSON.parse(saved);
-    } catch { /* ignore */ }
-
     if (!isSupabaseConfigured) {
-      if (devSession) {
-        const bundle = createMockWorkspaceBundle(devSession.name, devSession.email);
-        const userId = bundle.users[0].id;
-        ctxRef.current = { workspaceId: bundle.workspace.id, userId, userName: devSession.name };
-        baseDispatch({ type: 'HYDRATE', bundle, userId });
-      } else {
-        baseDispatch({ type: 'BOOT_DONE' });
-      }
+      baseDispatch({ type: 'BOOT_CONFIG_ERROR' });
       return;
     }
     const sb = getSupabase();
     let cancelled = false;
-
-    /**
-     * Kiểm tra xem tài khoản đăng nhập qua Discord có thuộc Discord Server nội bộ hay không.
-     * Nếu không thuộc: sign out ngay, lưu lý do vào sessionStorage và từ chối cấp quyền.
-     */
-    const checkDiscordGatekeeper = async (
-      session: {
-        user: { id: string; app_metadata?: { provider?: string }; identities?: Array<{ provider: string }> };
-        provider_token?: string | null;
-      },
-    ): Promise<boolean> => {
-      const isDiscordUser =
-        session.user.app_metadata?.provider === 'discord' ||
-        session.user.identities?.some((id) => id.provider === 'discord');
-
-      if (!isDiscordUser) return true;
-
-      let providerToken = session.provider_token;
-      if (!providerToken && typeof window !== 'undefined' && window.location.hash) {
-        try {
-          const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-          providerToken = params.get('provider_token');
-        } catch { /* ignore */ }
-      }
-
-      if (providerToken) {
-        const { allowed, reason } = await verifyDiscordGuildMembership(providerToken);
-        if (!allowed) {
-          try {
-            sessionStorage.setItem('nexus_auth_error', reason || 'Tài khoản Discord không thuộc Server nội bộ.');
-            sessionStorage.removeItem(`discord_verified_${session.user.id}`);
-          } catch { /* ignore */ }
-          try {
-            await sb.auth.signOut();
-          } catch { /* ignore */ }
-          return false;
-        } else {
-          try {
-            sessionStorage.setItem(`discord_verified_${session.user.id}`, 'true');
-          } catch { /* ignore */ }
-          return true;
-        }
-      }
-
-      try {
-        const isVerified = sessionStorage.getItem(`discord_verified_${session.user.id}`) === 'true';
-        if (isVerified) return true;
-      } catch { /* ignore */ }
-
-      return true;
-    };
-
-    let isProcessing = false;
-
-    const processSession = async (
-      session: {
-        user: { id: string; email?: string; app_metadata?: { provider?: string }; identities?: Array<{ provider: string; id?: string; identity_data?: Record<string, unknown> }>; user_metadata?: Record<string, unknown> };
-        provider_token?: string | null;
-      } | null,
-    ) => {
-      if (cancelled || isProcessing || loadedRef.current) return;
-      if (!session) {
-        baseDispatch({ type: 'BOOT_DONE' });
-        return;
-      }
-
-      isProcessing = true;
-      try {
-        let providerToken = session.provider_token;
-        if (!providerToken && typeof window !== 'undefined' && window.location.hash) {
-          try {
-            const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-            providerToken = params.get('provider_token');
-          } catch { /* ignore */ }
-        }
-        if (providerToken && typeof sessionStorage !== 'undefined') {
-          try {
-            sessionStorage.setItem('nexus_discord_provider_token', providerToken);
-          } catch { /* ignore */ }
-        } else if (!providerToken && typeof sessionStorage !== 'undefined') {
-          try {
-            providerToken = sessionStorage.getItem('nexus_discord_provider_token');
-          } catch { /* ignore */ }
-        }
-
-        const allowed = await checkDiscordGatekeeper(session);
-        if (!allowed) {
-          loadedRef.current = false;
-          ctxRef.current = null;
-          baseDispatch({ type: 'SESSION_END' });
-          return;
-        }
-
-        // Tự động đồng bộ tên hiển thị (ưu tiên tên riêng trong server BCN) & avatar Discord vào public.profiles
-        const { name: displayName } = await syncDiscordProfile(sb, session.user, providerToken);
-
-        loadedRef.current = true;
-        await loadForUser(session.user.id, displayName || getDiscordDisplayName(session.user));
-      } catch (e) {
-        console.error('Không tải được dữ liệu:', e);
-        baseDispatch({ type: 'BOOT_DONE' });
-      } finally {
-        isProcessing = false;
-      }
-    };
 
     (async () => {
       try {
         const { data: { session }, error } = await sb.auth.getSession();
         if (error) throw error;
         if (cancelled) return;
-        await processSession(session);
+        if (!session) {
+          baseDispatch({ type: 'BOOT_DONE' });
+          return;
+        }
+        loadedRef.current = true;
+        await loadForUser(session.user.id, session.user.user_metadata?.name ?? session.user.email ?? 'Thành viên');
       } catch (e) {
-        console.error('Không tải được session ban đầu:', e);
+        console.error('Không tải được dữ liệu:', e);
         if (!cancelled) baseDispatch({ type: 'BOOT_DONE' });
       }
     })();
@@ -539,12 +404,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (event === 'SIGNED_OUT') {
         loadedRef.current = false;
         ctxRef.current = null;
-        try {
-          sessionStorage.clear();
-        } catch { /* ignore */ }
         baseDispatch({ type: 'SESSION_END' });
-      } else if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
-        await processSession(session);
+      } else if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && !loadedRef.current) {
+        loadedRef.current = true;
+        try {
+          await loadForUser(session.user.id, session.user.user_metadata?.name ?? session.user.email ?? 'Thành viên');
+        } catch (e) {
+          console.error('Không tải được dữ liệu:', e);
+          baseDispatch({ type: 'BOOT_DONE' });
+        }
       }
     });
 
@@ -562,6 +430,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem(SIDEBAR_KEY, state.sidebarCollapsed ? '1' : '0');
     } catch { /* ignore */ }
   }, [state.theme, state.sidebarCollapsed]);
+
+  /**
+   * Đồng bộ realtime: khi có thay đổi trên Supabase (từ chính mình ở tab khác
+   * hay từ thành viên khác), tự tải lại dữ liệu workspace sau một nhịp debounce.
+   * RLS đảm bảo chỉ nhận sự kiện của những dòng mình được phép xem.
+   */
+  useEffect(() => {
+    const ctx = ctxRef.current;
+    if (!state.authed || !ctx) return;
+    const sb = getSupabase();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const scheduleRefresh = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!cancelled) refresh().catch((e) => console.error('Realtime refresh thất bại:', e));
+      }, 1200);
+    };
+
+    const channel = sb
+      .channel(`workspace:${ctx.workspaceId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_requests' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workspace_members' }, scheduleRefresh)
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      sb.removeChannel(channel);
+    };
+  }, [state.authed, refresh]);
 
 /**
  * Quy tắc duyệt nhiệm vụ: task đang ở trạng thái "Chờ duyệt" (in_review)
@@ -651,11 +556,6 @@ function assertMemberPermission(state: AppState, action: Action): void {
       baseDispatch(action);
       return;
     }
-    // Khi đang chạy preview mà chưa có Supabase, cập nhật state trực tiếp
-    if (!isSupabaseConfigured) {
-      baseDispatch(action as RichAction);
-      return;
-    }
     const ctx = ctxRef.current;
     if (!ctx) return;
     try {
@@ -671,24 +571,15 @@ function assertMemberPermission(state: AppState, action: Action): void {
 
   const signOut = useCallback(async () => {
     try {
-      localStorage.removeItem('nexus-dev-session');
-      sessionStorage.clear();
-    } catch { /* ignore */ }
-    if (isSupabaseConfigured) {
-      try {
-        await getSupabase().auth.signOut();
-      } catch {
-        /* auth listener sẽ dọn state qua SESSION_END */
-      }
+      await getSupabase().auth.signOut();
+    } catch {
+      /* auth listener sẽ dọn state qua SESSION_END */
     }
-    loadedRef.current = false;
-    ctxRef.current = null;
-    baseDispatch({ type: 'SESSION_END' });
   }, []);
 
   const value = useMemo(
-    () => ({ state, dispatch, signOut, loginDev }),
-    [state, dispatch, signOut, loginDev],
+    () => ({ state, dispatch, signOut, refresh }),
+    [state, dispatch, signOut, refresh],
   );
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
@@ -701,43 +592,16 @@ export function useApp() {
 
 export function useCurrentUser(): User {
   const { state } = useApp();
-  const found = state.users.find((u) => u.id === state.currentUserId);
-  let cachedUsername: string | undefined;
-  if (typeof localStorage !== 'undefined') {
-    try {
-      cachedUsername =
-        localStorage.getItem('nexus_discord_username') ||
-        sessionStorage.getItem('nexus_discord_username') ||
-        undefined;
-    } catch { /* ignore */ }
-  }
-
-  // Priority: Discord cached username > found.username > email prefix
-  let resolvedUsername = cachedUsername || found?.username;
-  if (!resolvedUsername && found?.email) {
-    const prefix = found.email.split('@')[0];
-    resolvedUsername = prefix.toLowerCase() === 'trantuongvan' ? '_trantuongvan' : prefix;
-  }
-  if (resolvedUsername?.toLowerCase() === 'trantuongvan') {
-    resolvedUsername = '_trantuongvan';
-  }
-
-  if (found) {
-    return {
-      ...found,
-      username: resolvedUsername,
-    };
-  }
-
-  return {
-    id: state.currentUserId,
-    name: '—',
-    email: '',
-    title: '',
-    role: 'member',
-    status: 'active',
-    username: resolvedUsername,
-  };
+  return (
+    state.users.find((u) => u.id === state.currentUserId) ?? {
+      id: state.currentUserId,
+      name: '—',
+      email: '',
+      title: '',
+      role: 'member',
+      status: 'active',
+    }
+  );
 }
 
 /* ---------- selectors (giữ nguyên để components không phải sửa) ---------- */
