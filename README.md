@@ -30,22 +30,47 @@ npm run build    # build production
 npm run preview  # xem bản build
 ```
 
-### Cấu hình Supabase (bắt buộc)
+### Cấu hình Supabase & Xác thực Nội bộ
 
-App đọc/ghi dữ liệu thật trên Supabase — không còn chế độ demo.
+Ứng dụng sử dụng Supabase (PostgreSQL + Auth + Storage) kết hợp xác thực nội bộ qua Discord Server Gatekeeper:
 
-1. Dùng project Supabase đã tạo (hoặc tạo project mới), lấy **Project URL** và **anon key** (Project Settings → API).
-2. Chạy migration theo thứ tự (thư mục `supabase/migrations/`, hoặc dán vào SQL Editor):
-   - `20261011000000_init.sql` (schema)
-   - `20261011000001_rls.sql` (Row Level Security + Storage bucket)
-   - `20261015000000_bootstrap.sql` (hàm `bootstrap_workspace` tạo workspace cho tài khoản mới)
-3. Tạo file `.env` từ `.env.example` và điền:
+1. **Khởi tạo Database & Chạy Migrations**:
+   Dùng project Supabase đã tạo (hoặc tạo project mới), chạy migration theo thứ tự trong thư mục `supabase/migrations/` (qua Supabase CLI `supabase db push` hoặc dán vào SQL Editor):
+   - `20261011000000_init.sql` (Khởi tạo toàn bộ bảng schema, trigger và index)
+   - `20261011000001_rls.sql` (Chính sách bảo mật RLS và Storage bucket `attachments`)
+   - `20261015000000_bootstrap.sql` (Hàm RPC `bootstrap_workspace` tự khởi tạo không gian làm việc cho tài khoản mới)
+
+2. **Cấu hình Biến môi trường (`.env`)**:
+   Tạo file `.env` từ `.env.example` và điền:
+   ```env
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   VITE_SUPABASE_ANON_KEY=eyJhbGciOi...
+   VITE_DISCORD_GUILD_ID=1337249537072435281
    ```
-   VITE_SUPABASE_URL=https://xxx.supabase.co
-   VITE_SUPABASE_ANON_KEY=eyJ...
+   *(Ghi chú: Nếu chưa điền URL và Anon Key, ứng dụng sẽ tự động chuyển sang chế độ Xem trước / Preview nội bộ để trải nghiệm UI mà không gây gián đoạn công việc).*
+
+3. **Cấu hình Discord OAuth & Server Gatekeeper**:
+   - Truy cập **Discord Developer Portal** (`https://discord.com/developers/applications`), tạo Application mới.
+   - Trong mục **OAuth2** → Redirects: Thêm URL callback của Supabase: `https://<your-project-ref>.supabase.co/auth/v1/callback`.
+   - Lấy **Client ID** và **Client Secret**.
+   - Trong **Supabase Dashboard** → **Authentication** → **Providers** → Chọn **Discord**:
+     - Bật Discord provider.
+     - Dán Client ID và Client Secret.
+   - Hệ thống sẽ tự động kiểm tra danh sách server của user qua token OAuth (`identify email guilds`). Chỉ người dùng thuộc Server nội bộ có ID khớp `VITE_DISCORD_GUILD_ID` mới được cấp quyền truy cập. Người ngoài sẽ bị từ chối và đăng xuất tự động.
+
+4. **Tạo tài khoản Dự phòng & Xác thực Email (Email + Mật khẩu)**:
+   - Dùng khi Discord gặp sự cố hoặc cần cấp quyền truy cập bằng email công việc.
+   - Trong **Supabase Dashboard** → **Authentication** → **Users**:
+     - Bấm **Add user** (hoặc **Invite user**): Nhập Email và Mật khẩu cho nhân viên.
+     - Nếu bật **Confirm email**: Supabase sẽ gửi thư chứa liên kết xác thực tới hòm thư của nhân viên. Nhân viên mở email bấm xác nhận để kích hoạt tài khoản trước khi đăng nhập.
+   - Trong **Authentication** → **URL Configuration**:
+     - Đặt **Site URL** trỏ về domain web của bạn (ví dụ: `http://localhost:5173` khi chạy dev, hoặc URL production).
+     - Thêm vào **Redirect URLs** đường dẫn web để Supabase chuyển hướng người dùng sau khi xác thực email thành công.
+
+5. **Khởi chạy ứng dụng**:
+   ```bash
+   npm run dev
    ```
-4. Trong Authentication → Providers: bật **Email** provider và **tắt "Confirm email"** để đăng ký xong đăng nhập ngay.
-5. Chạy `npm run dev` — đăng ký tài khoản đầu tiên, app sẽ tự tạo workspace + nhãn mặc định cho bạn.
 
 ## Cấu trúc project
 

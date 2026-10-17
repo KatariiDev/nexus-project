@@ -79,9 +79,9 @@ function UserMultiSelect({ users, selected, onToggle }: { users: User[]; selecte
       {users.map((u) => (
         <label key={u.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent">
           <Checkbox checked={selected.includes(u.id)} onChange={() => onToggle(u.id)} />
-          <Avatar name={u.name} size="xs" />
+          <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
           <span className="text-sm">{u.name}</span>
-          <span className="truncate text-xs text-muted-foreground">{u.title}</span>
+          <span className="truncate text-xs text-muted-foreground">{u.title || 'Thành viên'}</span>
         </label>
       ))}
     </div>
@@ -344,7 +344,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
               const author = userById(state.users, c.authorId);
               return (
                 <div key={c.id} className="group flex gap-2.5">
-                  <Avatar name={author?.name ?? '?'} size="sm" />
+                  <Avatar name={author?.name ?? '?'} avatarUrl={author?.avatarUrl} size="sm" />
                   <div className="min-w-0 flex-1 rounded-lg bg-muted/60 px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-semibold">{author?.name}</span>
@@ -393,17 +393,20 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
             <p className="text-sm text-muted-foreground">Chưa có hoạt động nào.</p>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {logs.map((l) => (
-                <div key={l.id} className="flex items-start gap-2.5 text-sm">
-                  <Avatar name={userById(state.users, l.actorId)?.name ?? '?'} size="xs" className="mt-0.5" />
-                  <div className="min-w-0">
-                    <span className="font-medium">{userById(state.users, l.actorId)?.name}</span>
-                    <span className="text-muted-foreground"> {l.action} </span>
-                    <span className="font-medium">{l.entityName}</span>
-                    <p className="text-xs text-muted-foreground">{timeAgo(l.createdAt)}</p>
+              {logs.map((l) => {
+                const actor = userById(state.users, l.actorId);
+                return (
+                  <div key={l.id} className="flex items-start gap-2.5 text-sm">
+                    <Avatar name={actor?.name ?? '?'} avatarUrl={actor?.avatarUrl} size="xs" className="mt-0.5" />
+                    <div className="min-w-0">
+                      <span className="font-medium">{actor?.name}</span>
+                      <span className="text-muted-foreground"> {l.action} </span>
+                      <span className="font-medium">{l.entityName}</span>
+                      <p className="text-xs text-muted-foreground">{timeAgo(l.createdAt)}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Section>

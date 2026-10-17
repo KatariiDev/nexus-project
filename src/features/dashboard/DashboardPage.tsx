@@ -323,7 +323,7 @@ export function DashboardPage() {
               const actor = userById(state.users, a.actorId);
               return (
                 <div key={a.id} className="flex items-start gap-3 px-5 py-3">
-                  <Avatar name={actor?.name ?? '?'} size="xs" />
+                  <Avatar name={actor?.name ?? '?'} avatarUrl={actor?.avatarUrl} size="xs" />
                   <div className="min-w-0 text-sm">
                     <p className="truncate">
                       <span className="font-medium">{actor?.name ?? 'Ai đó'}</span>{' '}
@@ -346,7 +346,7 @@ export function DashboardPage() {
           <CardContent className="flex flex-col gap-4">
             {topWorkload.map((u) => (
               <div key={u.id} className="flex items-center gap-3">
-                <Avatar name={u.name} size="sm" />
+                <Avatar name={u.name} avatarUrl={u.avatarUrl} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2 text-sm">
                     <span className="truncate font-medium">{u.name}</span>

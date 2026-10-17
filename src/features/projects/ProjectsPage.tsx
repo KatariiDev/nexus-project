@@ -33,7 +33,7 @@ import { Dropdown, DropdownItem, DropdownSeparator } from '../../components/ui/d
 import { toast } from '../../components/ui/toast';
 import { dueLabel, fmtDate, isOverdue, timeAgo } from '../../lib/format';
 import { PRIORITIES, PROJECT_STATUSES } from '../../types';
-import type { Priority, Project, ProjectStatus } from '../../types';
+import type { Priority, Project, ProjectStatus, User } from '../../types';
 import { ProjectForm } from './ProjectForm';
 import { cn, newId } from '../../lib/utils';
 
@@ -385,9 +385,9 @@ function ProjectCard({
   const navigate = useNavigate();
   const progress = projectProgress(state.tasks, project.id);
   const manager = userById(state.users, project.managerId);
-  const memberNames = project.memberIds
-    .map((id) => userById(state.users, id)?.name)
-    .filter((n): n is string => Boolean(n));
+  const members = project.memberIds
+    .map((id) => userById(state.users, id))
+    .filter((u): u is User => Boolean(u));
   const due = dueLabel(project.endDate, project.status === 'completed' ? 'done' : undefined);
   const archived = project.status === 'archived';
 
@@ -446,7 +446,7 @@ function ProjectCard({
             <CalendarDays className="h-4 w-4" />
             {due.text}
           </span>
-          <AvatarStack names={memberNames} max={4} />
+          <AvatarStack users={members} max={4} />
         </div>
 
         <div className="flex items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
@@ -692,12 +692,12 @@ export function ProjectDetailPage() {
               {members.length === 0 && <p className="text-sm text-muted-foreground">Chưa có thành viên.</p>}
               {members.map((m) => (
                 <div key={m.id} className="flex items-center gap-3">
-                  <Avatar name={m.name} size="sm" />
+                  <Avatar name={m.name} avatarUrl={m.avatarUrl} size="sm" />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
                       {m.name} {m.id === project.managerId && <Badge tone="primary" className="ml-1">Quản lý</Badge>}
                     </p>
-                    <p className="truncate text-xs text-muted-foreground">{m.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{m.title || 'Thành viên'}</p>
                   </div>
                 </div>
               ))}
@@ -717,8 +717,8 @@ export function ProjectDetailPage() {
             {tasks.map((t) => {
               const due = dueLabel(t.dueDate, t.status);
               const assignees = t.assigneeIds
-                .map((aid) => userById(state.users, aid)?.name)
-                .filter((n): n is string => Boolean(n));
+                .map((aid) => userById(state.users, aid))
+                .filter((u): u is User => Boolean(u));
               return (
                 <button key={t.id} onClick={() => openTask(t.id)} className="flex flex-col gap-2 p-4 text-left transition-colors hover:bg-accent/50 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
@@ -729,7 +729,7 @@ export function ProjectDetailPage() {
                     <TaskStatusBadge status={t.status} />
                     <PriorityBadge priority={t.priority} />
                     <span className={cn('text-xs font-medium', DUE_TONE_CLASS[due.tone])}>{due.text}</span>
-                    {assignees.length > 0 && <AvatarStack names={assignees} max={3} size="xs" />}
+                    {assignees.length > 0 && <AvatarStack users={assignees} max={3} size="xs" />}
                   </div>
                 </button>
               );
@@ -750,7 +750,7 @@ export function ProjectDetailPage() {
               const actor = userById(state.users, a.actorId);
               return (
                 <div key={a.id} className="flex items-start gap-3 p-4">
-                  <Avatar name={actor?.name ?? '?'} size="xs" />
+                  <Avatar name={actor?.name ?? '?'} avatarUrl={actor?.avatarUrl} size="xs" />
                   <div className="min-w-0 text-sm">
                     <p>
                       <span className="font-medium">{actor?.name ?? 'Ai đó'}</span>{' '}
