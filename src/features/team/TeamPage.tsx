@@ -114,13 +114,19 @@ export function TeamPage() {
               <Card key={u.id} className="transition-shadow hover:shadow-lift">
                 <CardContent className="flex flex-col gap-4 p-5">
                   <div className="flex items-start gap-3">
-                    <Avatar name={u.name} size="lg" />
+                    <Avatar name={u.name} avatarUrl={u.avatarUrl} size="lg" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-semibold">
                         {u.name}
                         {isSelf && <span className="ml-1.5 text-xs font-normal text-muted-foreground">(bạn)</span>}
                       </p>
-                      <p className="truncate text-sm text-muted-foreground">{u.title}</p>
+                      <p className="truncate text-xs font-mono text-muted-foreground">
+                        {(() => {
+                          const un = isSelf ? me.username || u.username : u.username;
+                          if (!un) return u.title || 'Thành viên';
+                          return un.startsWith('@') ? un : `@${un}`;
+                        })()}
+                      </p>
                       <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
                         <Mail className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{u.email}</span>
