@@ -87,7 +87,7 @@ export function AdminShell() {
             <div className="min-w-0 flex-1 leading-tight">
               <p className="truncate text-sm font-semibold">{me.name}</p>
               <p className="truncate text-xs font-mono text-muted-foreground">
-                {me.username ? (me.username.startsWith('@') ? me.username : `@${me.username}`) : 'Admin'}
+                {me.username}
               </p>
             </div>
           </div>
