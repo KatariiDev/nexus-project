@@ -83,10 +83,12 @@ export function AdminShell() {
         </nav>
         <div className="border-t p-3">
           <div className="flex items-center gap-3 rounded-md p-2">
-            <Avatar name={me.name} size="sm" />
+            <Avatar name={me.name} avatarUrl={me.avatarUrl} size="sm" />
             <div className="min-w-0 flex-1 leading-tight">
               <p className="truncate text-sm font-semibold">{me.name}</p>
-              <p className="truncate text-xs text-muted-foreground">Admin</p>
+              <p className="truncate text-xs font-mono text-muted-foreground">
+                {me.username ? (me.username.startsWith('@') ? me.username : `@${me.username}`) : 'Admin'}
+              </p>
             </div>
           </div>
           <Button variant="outline" className="mt-2 w-full" onClick={() => (window.location.href = '/user')}>
@@ -241,7 +243,11 @@ export function ApprovalsPage() {
             </p>
           )}
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Avatar name={userName(state, r.requestedBy)} size="sm" />
+            <Avatar
+              name={userName(state, r.requestedBy)}
+              avatarUrl={state.users.find((u) => u.id === r.requestedBy)?.avatarUrl}
+              size="sm"
+            />
             <span>Người yêu cầu: <b className="text-foreground">{userName(state, r.requestedBy)}</b></span>
           </div>
           {r.status !== 'pending' && (
@@ -340,7 +346,11 @@ export function AdminLogsPage() {
           <ul className="divide-y">
             {logs.map((l) => (
               <li key={l.id} className="flex items-center gap-3 px-5 py-3 text-sm">
-                <Avatar name={userName(state, l.actorId)} size="sm" />
+                <Avatar
+                  name={userName(state, l.actorId)}
+                  avatarUrl={state.users.find((u) => u.id === l.actorId)?.avatarUrl}
+                  size="sm"
+                />
                 <div className="min-w-0 flex-1">
                   <p className="truncate">
                     <b>{userName(state, l.actorId)}</b> {l.action}{' '}

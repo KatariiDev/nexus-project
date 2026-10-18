@@ -103,7 +103,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
           {state.users.map((u) => (
             <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
               <Checkbox checked={memberIds.includes(u.id)} onChange={() => toggleMember(u.id)} />
-              <Avatar name={u.name} size="xs" />
+              <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
               <span className="text-sm">
                 <span className="font-medium">{u.name}</span>
                 {u.id === state.currentUserId && <span className="text-muted-foreground"> (bạn)</span>}
