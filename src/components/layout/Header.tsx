@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Search, Plus, Bell, Sun, Moon, ChevronRight, LogOut, User as UserIcon, Settings as SettingsIcon } from 'lucide-react';
+import { Search, Plus, Bell, Sun, Moon, ChevronRight, LogOut, User as UserIcon, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
 import { useApp, useCurrentUser } from '../../store/AppContext';
+import { canAccessAdmin } from '../../lib/roles';
 import { Avatar } from '../ui/avatar';
 import { Button } from '../ui/button';
 import { Dropdown, DropdownItem, DropdownSeparator, DropdownLabel } from '../ui/dropdown';
@@ -23,6 +24,7 @@ const CRUMBS: Record<string, string> = {
 export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () => void; onOpenQuickCreate: () => void }) {
   const { state, dispatch, signOut } = useApp();
   const user = useCurrentUser();
+  const isAdmin = canAccessAdmin(user.role);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -103,21 +105,44 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
 
       <Dropdown
         trigger={
-          <button className="rounded-full ring-2 ring-transparent transition hover:ring-primary/20 focus:outline-none">
+          <button className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2 transition hover:bg-accent focus:outline-none">
             <Avatar name={user.name} avatarUrl={user.avatarUrl} size="sm" />
+            {isAdmin && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Admin
+              </span>
+            )}
           </button>
         }
       >
         <div className="flex items-center gap-3 px-3 py-2.5">
           <Avatar name={user.name} avatarUrl={user.avatarUrl} size="sm" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{user.name}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="truncate text-sm font-semibold">{user.name}</p>
+              {isAdmin && (
+                <span className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  Admin
+                </span>
+              )}
+            </div>
             <p className="truncate text-xs font-mono text-muted-foreground">
               {user.username}
             </p>
           </div>
         </div>
         <DropdownSeparator />
+        {isAdmin && (
+          <>
+            <DropdownItem
+              icon={<ShieldCheck className="h-4 w-4 text-primary" />}
+              label="Trang quản trị"
+              onClick={() => navigate('/admin/overview')}
+            />
+            <DropdownSeparator />
+          </>
+        )}
         <DropdownItem icon={<UserIcon className="h-4 w-4" />} label="Hồ sơ cá nhân" onClick={() => navigate('/user/settings')} />
         <DropdownItem icon={<SettingsIcon className="h-4 w-4" />} label="Cài đặt" onClick={() => navigate('/user/settings')} />
         <DropdownSeparator />
