@@ -13,6 +13,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   bootstrapWorkspace,
+  fetchIsSuperAdmin,
   fetchMyMemberships,
   loadWorkspaceData,
   persistAction,
@@ -58,6 +59,8 @@ export interface AppState {
   loading: boolean;
   configError: boolean;
   workspace: Workspace;
+  /** Toàn bộ workspace (Admin tổng thấy tất cả; người thường chỉ có 1). */
+  workspaces: Workspace[];
   users: User[];
   currentUserId: string;
   labels: Label[];
@@ -146,6 +149,7 @@ function emptyState(): AppState {
     loading: true,
     configError: false,
     workspace: { id: '', name: '', timezone: 'Asia/Ho_Chi_Minh' },
+    workspaces: [],
     users: [],
     currentUserId: '',
     labels: [],
@@ -176,6 +180,7 @@ function reducer(state: AppState, action: RichAction): AppState {
         authed: true,
         loading: false,
         workspace: action.bundle.workspace,
+        workspaces: action.bundle.workspaces,
         users: action.bundle.users,
         currentUserId: action.userId,
         labels: action.bundle.labels,
@@ -365,8 +370,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       saved = localStorage.getItem(WORKSPACE_KEY);
     } catch { /* ignore */ }
     const active = memberships.find((m) => m.workspaceId === saved) ?? memberships[0];
-    ctxRef.current = { workspaceId: active.workspaceId, userId, userName };
-    const bundle = await loadWorkspaceData(sb, userId, active.workspaceId);
+    const isSuperAdmin = await fetchIsSuperAdmin(sb, userId);
+    ctxRef.current = { workspaceId: active.workspaceId, userId, userName, isSuperAdmin };
+    const bundle = await loadWorkspaceData(sb, userId, active.workspaceId, isSuperAdmin);
     try {
       localStorage.setItem(WORKSPACE_KEY, active.workspaceId);
     } catch { /* ignore */ }
@@ -689,9 +695,10 @@ function assertProjectMembership(state: AppState, action: Action): void {
 function assertProjectPermission(state: AppState, action: Action): void {
   const me = state.users.find((u) => u.id === state.currentUserId);
   const role = me?.role ?? 'viewer';
+  const isSuperAdmin = me?.isSuperAdmin ?? false;
 
-  // Chỉ Admin được duyệt / từ chối yêu cầu.
-  if (action.type === 'PROJECT_REQUEST_REVIEW' && !canReviewProjectRequests(role)) {
+  // Chỉ Admin (hoặc Admin tổng) được duyệt / từ chối yêu cầu.
+  if (action.type === 'PROJECT_REQUEST_REVIEW' && !canReviewProjectRequests(role, isSuperAdmin)) {
     throw new Error('Chỉ Admin mới được duyệt yêu cầu.');
   }
   // Thành viên được gửi yêu cầu tạo/tạm dừng/xóa dự án.

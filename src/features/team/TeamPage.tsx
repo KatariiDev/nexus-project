@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Briefcase, ListTodo, Mail, UserPlus, Users } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Briefcase, ListTodo, Mail, UserPlus, Users, ShieldCheck } from 'lucide-react';
 import { useApp, useCurrentUser } from '../../store/AppContext';
 import { useUI } from '../../components/layout/UIContext';
 import { EmptyState, PageHeader } from '../../components/ui/feedback';
@@ -7,12 +7,16 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Avatar } from '../../components/ui/avatar';
 import { Select } from '../../components/ui/input';
+import { Switch } from '../../components/ui/controls';
 import { Progress } from '../../components/ui/progress';
 import { Card, CardContent } from '../../components/ui/card';
 import { toast } from '../../components/ui/toast';
 import { WORKSPACE_ROLES, roleLabel } from '../../types';
 import type { User, WorkspaceRole } from '../../types';
 import { assignableRoles, canManageMembers } from '../../lib/roles';
+import { getSupabase } from '../../lib/supabase';
+import { setSuperAdmin } from '../../lib/db';
+import { cn } from '../../lib/utils';
 
 type RoleTone = 'purple' | 'primary' | 'info' | 'muted';
 
@@ -29,7 +33,7 @@ function RoleBadge({ role }: { role: WorkspaceRole }) {
 }
 
 export function TeamPage() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, refresh } = useApp();
   const { setQuickCreateTab, setQuickCreateOpen } = useUI();
   const me = useCurrentUser();
 
@@ -46,6 +50,24 @@ export function TeamPage() {
   const handleRoleChange = (user: User, role: WorkspaceRole) => {
     dispatch({ type: 'USER_UPDATE_ROLE', id: user.id, role });
     toast('Đã cập nhật vai trò', `${user.name} → ${roleLabel(role)}`);
+  };
+
+  const [superBusy, setSuperBusy] = useState<string | null>(null);
+  /** Cấp/gỡ quyền Admin tổng — chỉ Admin tổng mới thấy và thao tác được. */
+  const handleSuperAdminToggle = async (user: User, makeAdmin: boolean) => {
+    setSuperBusy(user.id);
+    try {
+      await setSuperAdmin(getSupabase(), user.id, makeAdmin);
+      await refresh();
+      toast(
+        makeAdmin ? 'Đã cấp quyền Admin tổng' : 'Đã gỡ quyền Admin tổng',
+        user.name,
+      );
+    } catch (e) {
+      toast('Không thể phân quyền', e instanceof Error ? e.message : 'Đã xảy ra lỗi.', 'error');
+    } finally {
+      setSuperBusy(null);
+    }
   };
 
   const inviteMember = () => {
@@ -92,19 +114,13 @@ export function TeamPage() {
               <Card key={u.id} className="transition-shadow hover:shadow-lift">
                 <CardContent className="flex flex-col gap-4 p-5">
                   <div className="flex items-start gap-3">
-                    <Avatar name={u.name} avatarUrl={u.avatarUrl} size="lg" />
+                    <Avatar name={u.name} size="lg" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-semibold">
                         {u.name}
                         {isSelf && <span className="ml-1.5 text-xs font-normal text-muted-foreground">(bạn)</span>}
                       </p>
-                      <p className="truncate text-xs font-mono text-muted-foreground">
-                        {(() => {
-                          const un = isSelf ? me.username || u.username : u.username;
-                          if (!un) return u.title || 'Thành viên';
-                          return un.startsWith('@') ? un : `@${un}`;
-                        })()}
-                      </p>
+                      <p className="truncate text-sm text-muted-foreground">{u.title}</p>
                       <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
                         <Mail className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{u.email}</span>
@@ -114,6 +130,11 @@ export function TeamPage() {
 
                   <div className="flex flex-wrap items-center gap-1.5">
                     <RoleBadge role={u.role} />
+                    {u.isSuperAdmin && (
+                      <Badge tone="primary">
+                        <ShieldCheck className="mr-1 h-3 w-3" /> Admin tổng
+                      </Badge>
+                    )}
                     {u.status === 'invited' && <Badge tone="warning">Đã mời</Badge>}
                   </div>
 
@@ -142,23 +163,37 @@ export function TeamPage() {
                     <Progress value={u.workload ?? 0} />
                   </div>
 
-                  <div className="flex items-center gap-2 border-t pt-3">
-                    <span className="text-xs text-muted-foreground">Vai trò:</span>
-                    <Select
-                      value={u.role}
-                      disabled={isSelf || !canInvite}
-                      title={isSelf ? 'Bạn không thể tự thay đổi vai trò của chính mình' : canInvite ? 'Đổi vai trò' : 'Chỉ Admin/Owner mới được đổi vai trò'}
-                      onChange={(e) => handleRoleChange(u, e.target.value as WorkspaceRole)}
-                      className="h-8 text-xs"
-                      aria-label={`Vai trò của ${u.name}`}
-                    >
-                      {WORKSPACE_ROLES.filter((r) => allowedRoles.includes(r.value) || r.value === u.role).map((r) => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
+                  {me.isSuperAdmin ? (
+                    <div className="flex items-center gap-2 border-t pt-3">
+                      <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 text-xs text-muted-foreground">Quyền Admin tổng</span>
+                      <Switch
+                        checked={u.isSuperAdmin}
+                        onChange={(v) => handleSuperAdminToggle(u, v)}
+                        className={cn(
+                          superBusy === u.id || isSelf ? 'pointer-events-none opacity-50' : undefined,
+                        )}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 border-t pt-3">
+                      <span className="text-xs text-muted-foreground">Vai trò:</span>
+                      <Select
+                        value={u.role}
+                        disabled={isSelf || !canInvite}
+                        title={isSelf ? 'Bạn không thể tự thay đổi vai trò của chính mình' : canInvite ? 'Đổi vai trò' : 'Chỉ Admin/Owner mới được đổi vai trò'}
+                        onChange={(e) => handleRoleChange(u, e.target.value as WorkspaceRole)}
+                        className="h-8 text-xs"
+                        aria-label={`Vai trò của ${u.name}`}
+                      >
+                        {WORKSPACE_ROLES.filter((r) => allowedRoles.includes(r.value) || r.value === u.role).map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );

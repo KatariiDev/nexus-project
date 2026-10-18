@@ -28,6 +28,12 @@ const ADMIN_NAV = [
   { to: '/admin/logs', label: 'Nhật ký', icon: History },
 ];
 
+/** Tên workspace từ id — dùng khi Admin tổng xem dữ liệu nhiều workspace. */
+function wsName(state: ReturnType<typeof useApp>['state'], workspaceId?: string): string {
+  if (!workspaceId) return '';
+  return state.workspaces.find((w) => w.id === workspaceId)?.name ?? '';
+}
+
 /** Layout riêng cho khu vực /admin/* — chỉ Admin vào được (guard ở router). */
 export function AdminShell() {
   const { state } = useApp();
@@ -222,6 +228,7 @@ export function ApprovalsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="primary">{projectRequestTypeLabel(r.type)}</Badge>
             <Badge tone={statusTone[r.status]}>{statusLabel[r.status]}</Badge>
+            {wsName(state, r.workspaceId) && <Badge tone="info">{wsName(state, r.workspaceId)}</Badge>}
             <span className="ml-auto text-xs text-muted-foreground">{timeAgo(r.createdAt)}</span>
           </div>
           <p className="text-lg font-semibold">{requestName(r, state)}</p>
@@ -357,7 +364,7 @@ export function AdminLogsPage() {
 /** Guard dùng trong router: chỉ Admin được vào /admin/*. */
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
   const me = useCurrentUser();
-  if (!canAccessAdmin(me.role)) {
+  if (!canAccessAdmin(me.role, me.isSuperAdmin)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
         <ShieldCheck className="h-12 w-12 text-muted-foreground" />
