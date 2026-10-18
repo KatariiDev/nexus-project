@@ -174,7 +174,7 @@ export function TeamPage() {
                       <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
                       <span className="flex-1 text-xs text-muted-foreground">Quyền Admin tổng</span>
                       <Switch
-                        checked={u.isSuperAdmin}
+                        checked={Boolean(u.isSuperAdmin)}
                         onChange={(v) => handleSuperAdminToggle(u, v)}
                         className={cn(
                           superBusy === u.id || isSelf ? 'pointer-events-none opacity-50' : undefined,

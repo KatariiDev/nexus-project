@@ -113,6 +113,7 @@ function mapUser(p: DbProfile, role: string): User {
     status: 'active',
     avatarUrl: p.avatar_url ?? undefined,
     username: mappedUsername,
+    isSuperAdmin: Boolean((p as unknown as { is_super_admin?: boolean }).is_super_admin),
   };
 }
 
@@ -646,13 +647,9 @@ export async function persistAction(
       if (error) throwDb(error, 'Không gửi được yêu cầu.');
       const log = buildLog(ctx, 'đã gửi yêu cầu', 'project', r.projectId ?? r.id, requestTitle(r));
       await insertLog(sb, ctx, log);
-      // Báo cho Admin biết có yêu cầu mới cần duyệt (lấy mới từ DB để không sót khi role vừa đổi).
-      // Gửi cho cả admin của workspace lẫn các Admin tổng (toàn hệ thống).
-      const adminIds = await freshRoleUserIds(sb, ctx.workspaceId, ['admin']);
-      const superIds = await freshSuperAdminIds(sb);
-      const notifyIds = [...new Set([...adminIds, ...superIds])].filter((id) => id !== ctx.userId);
-      if (notifyIds.length > 0) {
-        const rows = notifyIds.map((userId) => ({
+      const adminIds = (await freshRoleUserIds(sb, ctx.workspaceId, ['admin'])).filter((id) => id !== ctx.userId);
+      if (adminIds.length > 0) {
+        const rows = adminIds.map((userId) => ({
           id: newId(),
           user_id: userId,
           kind: 'project',
@@ -988,4 +985,18 @@ export async function persistAction(
     default:
       return action;
   }
+}
+
+export async function fetchIsSuperAdmin(sb: Sb, userId: string): Promise<boolean> {
+  try {
+    const { data } = await sb.from('profiles').select('is_super_admin').eq('id', userId).maybeSingle();
+    return Boolean((data as unknown as { is_super_admin?: boolean })?.is_super_admin);
+  } catch {
+    return false;
+  }
+}
+
+export async function setSuperAdmin(sb: Sb, targetId: string, makeAdmin: boolean): Promise<void> {
+  const { error } = await sb.from('profiles').update({ is_super_admin: makeAdmin }).eq('id', targetId);
+  if (error) throwDb(error, 'Không thể cập nhật quyền Admin tổng.');
 }
