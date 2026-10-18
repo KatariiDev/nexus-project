@@ -35,6 +35,7 @@ interface DbProfile {
   id: string;
   name: string;
   email: string;
+  username?: string | null;
   title: string | null;
   avatar_url: string | null;
 }
@@ -94,7 +95,7 @@ const num = (v: number | string | null | undefined): number | undefined =>
   v === null || v === undefined || v === '' ? undefined : Number(v);
 
 function mapUser(p: DbProfile, role: string): User {
-  let mappedUsername = (p as unknown as { username?: string }).username;
+  let mappedUsername = p.username ?? undefined;
   if (!mappedUsername && p.email) {
     const prefix = p.email.split('@')[0];
     mappedUsername = prefix.toLowerCase() === 'trantuongvan' ? '_trantuongvan' : prefix;
@@ -176,8 +177,8 @@ export async function fetchMyMemberships(sb: Sb, userId: string): Promise<Member
   }));
 }
 
-/** Tạo workspace + profile + quyền owner cho user mới (RPC security definer). */
-export async function bootstrapWorkspace(sb: Sb, name = 'Workspace của tôi'): Promise<string> {
+/** Tạo hoặc tham gia workspace chung + profile cho user (RPC security definer). */
+export async function bootstrapWorkspace(sb: Sb, name = 'Ban Công Nghệ'): Promise<string> {
   const { data, error } = await sb.rpc('bootstrap_workspace', { ws_name: name });
   if (error) throw error;
   return data as string;
@@ -226,7 +227,7 @@ export async function loadWorkspaceData(sb: Sb, userId: string, workspaceId: str
     requestsRes,
   ] = await Promise.all([
     sb.from('workspaces').select('*').eq('id', workspaceId).single(),
-    sb.from('workspace_members').select('user_id, role, profiles(id, name, email, title, avatar_url)').eq('workspace_id', workspaceId),
+    sb.from('workspace_members').select('user_id, role, profiles(id, name, email, username, title, avatar_url)').eq('workspace_id', workspaceId),
     sb.from('labels').select('*').eq('workspace_id', workspaceId),
     sb.from('project_members').select('project_id, user_id').in('project_id', projectIdFilter),
     sb.from('tasks').select('*').in('project_id', projectIdFilter).order('created_at', { ascending: false }),
@@ -499,7 +500,7 @@ async function notifyReview(
 ): Promise<void> {
   const targets =
     event === 'requested'
-      ? (await freshRoleUserIds(sb, ctx.workspaceId, ['owner', 'admin'])).filter((id) => id !== ctx.userId)
+      ? (await freshRoleUserIds(sb, ctx.workspaceId, ['admin'])).filter((id) => id !== ctx.userId)
       : task.assigneeIds.filter((id) => id !== ctx.userId);
   if (targets.length === 0) return;
   const meta = {
@@ -660,8 +661,14 @@ export async function persistAction(
             priority: (p.priority as Project['priority']) ?? 'medium',
             startDate: String(p.startDate ?? now.slice(0, 10)),
             endDate: String(p.endDate ?? now.slice(0, 10)),
-            managerId: String(p.managerId ?? ctx.userId),
-            memberIds: Array.isArray(p.memberIds) ? (p.memberIds as string[]) : [ctx.userId],
+            managerId: String(p.managerId || req.requestedBy || ctx.userId),
+            memberIds: Array.from(
+              new Set([
+                ...(Array.isArray(p.memberIds) ? (p.memberIds as string[]) : []),
+                String(p.managerId || req.requestedBy || ctx.userId),
+                req.requestedBy,
+              ]),
+            ),
             budget: typeof p.budget === 'number' ? p.budget : undefined,
             color: String(p.color ?? '#4F46E5'),
             createdAt: now,
@@ -860,10 +867,11 @@ export async function persistAction(
 
     case 'USER_ADD': {
       // Thêm thành viên đã có tài khoản Nexus vào workspace bằng email.
+      const cleanInput = action.email.trim().toLowerCase();
       const { data: profile, error: findErr } = await sb
         .from('profiles')
-        .select('id, name, email, title, avatar_url')
-        .eq('email', action.email.trim().toLowerCase())
+        .select('id, name, email, username, title, avatar_url')
+        .ilike('email', cleanInput)
         .maybeSingle();
       if (findErr) throwDb(findErr, 'Không tìm được thành viên.');
       if (!profile) throw new Error(`Email ${action.email} chưa đăng ký tài khoản Nexus. Người này cần đăng ký trước.`);

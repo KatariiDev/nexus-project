@@ -769,22 +769,34 @@ export async function syncDiscordProfile(
   } catch { /* ignore */ }
 
   try {
-    const payload: { id: string; name: string; email: string; avatar_url?: string; updated_at: string } = {
+    const cleanEmail = (user.email ?? '').trim().toLowerCase();
+    const payload: {
+      id: string;
+      name: string;
+      email: string;
+      username?: string;
+      avatar_url?: string;
+      updated_at: string;
+    } = {
       id: user.id,
       name,
-      email: user.email ?? '',
+      email: cleanEmail,
+      ...(username ? { username } : {}),
+      ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
       updated_at: new Date().toISOString(),
     };
-    if (avatarUrl) {
-      payload.avatar_url = avatarUrl;
-    }
 
     const { error: upsertErr } = await sb.from('profiles').upsert(payload, { onConflict: 'id' });
     if (upsertErr) {
-      // Thử dùng update nếu upsert bị trigger cản
+      // Thử dùng update nếu upsert bị cản
       await sb
         .from('profiles')
-        .update({ name, ...(avatarUrl ? { avatar_url: avatarUrl } : {}), updated_at: new Date().toISOString() })
+        .update({
+          name,
+          ...(username ? { username } : {}),
+          ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', user.id);
     }
   } catch (err) {

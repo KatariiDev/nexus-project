@@ -71,8 +71,8 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
             description: '',
             status: 'planning',
             priority: 'medium',
-            managerId: '',
-            memberIds: [],
+            managerId: me.id,
+            memberIds: [me.id],
             startDate: today,
             endDate: addDaysISO(new Date(), 30).slice(0, 10),
             budget: '',
@@ -225,12 +225,12 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
           </Field>
         </div>
 
-        <Field label="Người quản lý *" error={errors.managerId}>
+        <Field label="Trưởng dự án (Leader) *" error={errors.managerId}>
           <Select value={form.managerId} onChange={(e) => set('managerId', e.target.value)}>
-            <option value="">Chọn người quản lý</option>
+            <option value="">Chọn Trưởng dự án</option>
             {state.users.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.name} · {u.title}
+                {u.name} {u.id === me.id ? '(Bạn)' : ''} · {u.title || 'Thành viên'}
               </option>
             ))}
           </Select>

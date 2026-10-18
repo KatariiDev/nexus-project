@@ -181,11 +181,11 @@ export const PRIORITIES: { value: Priority; label: string }[] = [
 ];
 
 export const WORKSPACE_ROLES: { value: WorkspaceRole; label: string; desc: string }[] = [
-  { value: 'owner', label: 'Owner', desc: 'Toàn quyền workspace' },
-  { value: 'admin', label: 'Admin', desc: 'Quản trị workspace và thành viên' },
-  { value: 'manager', label: 'Project Manager', desc: 'Quản lý các dự án được phân quyền' },
-  { value: 'member', label: 'Member', desc: 'Thực hiện và cập nhật nhiệm vụ' },
-  { value: 'viewer', label: 'Viewer', desc: 'Chỉ xem dữ liệu được cấp quyền' },
+  { value: 'admin', label: 'Admin', desc: 'Quản trị hệ thống và phê duyệt dự án' },
+  { value: 'member', label: 'Thành viên', desc: 'Đề xuất dự án để làm Leader, tham gia dự án & làm nhiệm vụ' },
+  { value: 'manager', label: 'Leader', desc: 'Trưởng dự án phụ trách' },
+  { value: 'owner', label: 'Admin', desc: 'Toàn quyền workspace' },
+  { value: 'viewer', label: 'Viewer', desc: 'Chỉ xem dữ liệu' },
 ];
 
 export function taskStatusLabel(s: TaskStatus): string {
