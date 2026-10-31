@@ -13,12 +13,13 @@ import {
   subDays,
 } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { useApp } from '../../store/AppContext';
+import { useApp, useCurrentUser } from '../../store/AppContext';
 import { useUI } from '../../components/layout/UIContext';
 import { EmptyState, PageHeader } from '../../components/ui/feedback';
 import { Tabs } from '../../components/ui/tabs';
 import { Select } from '../../components/ui/input';
 import { isOverdue } from '../../lib/format';
+import { visibleProjects } from '../../lib/roles';
 import { cn } from '../../lib/utils';
 
 type Scale = 'day' | 'week' | 'month';
@@ -35,20 +36,26 @@ function parseDay(iso?: string | null): Date | null {
 
 export function GanttPage() {
   const { state } = useApp();
+  const me = useCurrentUser();
   const { openTask } = useUI();
   const [scale, setScale] = useState<Scale>('week');
   const [projectFilter, setProjectFilter] = useState<string>('all');
 
   const dayWidth = DAY_WIDTH[scale];
 
+  // Member chỉ thấy dự án đã tham gia (Admin thấy tất cả).
+  const visibleProjectsList = useMemo(() => visibleProjects(state.projects, me), [state.projects, me]);
+  const visibleIds = useMemo(() => new Set(visibleProjectsList.map((p) => p.id)), [visibleProjectsList]);
+
   /* Chỉ lấy task có đủ ngày bắt đầu và hạn, có ngày hợp lệ */
   const ganttTasks = useMemo(() => {
     return state.tasks
+      .filter((t) => visibleIds.has(t.projectId))
       .filter((t) => projectFilter === 'all' || t.projectId === projectFilter)
       .map((t) => ({ task: t, start: parseDay(t.startDate), due: parseDay(t.dueDate) }))
       .filter((x): x is { task: (typeof state.tasks)[number]; start: Date; due: Date } => x.start !== null && x.due !== null)
       .sort((a, b) => a.start.getTime() - b.start.getTime() || a.due.getTime() - b.due.getTime());
-  }, [state.tasks, projectFilter]);
+  }, [state.tasks, visibleIds, projectFilter]);
 
   const range = useMemo(() => {
     if (ganttTasks.length === 0) return null;
@@ -148,7 +155,7 @@ export function GanttPage() {
             />
             <Select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="w-44" aria-label="Lọc theo dự án">
               <option value="all">Tất cả dự án</option>
-              {state.projects.map((p) => (
+              {visibleProjectsList.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>

@@ -20,7 +20,7 @@ import {
   subWeeks,
 } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { useApp } from '../../store/AppContext';
+import { useApp, useCurrentUser } from '../../store/AppContext';
 import { useUI } from '../../components/layout/UIContext';
 import { EmptyState, PageHeader } from '../../components/ui/feedback';
 import { Tabs } from '../../components/ui/tabs';
@@ -31,6 +31,7 @@ import { TASK_STATUSES, priorityLabel } from '../../types';
 import type { Priority, Task } from '../../types';
 import { cn } from '../../lib/utils';
 import { fmtDate } from '../../lib/format';
+import { visibleProjects } from '../../lib/roles';
 
 type View = 'month' | 'week' | 'day';
 type EventKind = 'due' | 'start';
@@ -65,21 +66,27 @@ function capitalize(s: string): string {
 
 export function CalendarPage() {
   const { state } = useApp();
+  const me = useCurrentUser();
   const { openTask, setQuickCreateTab, setQuickCreateOpen } = useUI();
   const [view, setView] = useState<View>('month');
   const [cursor, setCursor] = useState<Date>(() => new Date());
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  const projectById = useMemo(() => new Map(state.projects.map((p) => [p.id, p])), [state.projects]);
+  // Member chỉ thấy dự án đã tham gia (Admin thấy tất cả).
+  const visibleProjectsList = useMemo(() => visibleProjects(state.projects, me), [state.projects, me]);
+  const visibleIds = useMemo(() => new Set(visibleProjectsList.map((p) => p.id)), [visibleProjectsList]);
+
+  const projectById = useMemo(() => new Map(visibleProjectsList.map((p) => [p.id, p])), [visibleProjectsList]);
 
   const filteredTasks = useMemo(() => {
     return state.tasks.filter((t) => {
+      if (!visibleIds.has(t.projectId)) return false;
       if (projectFilter !== 'all' && t.projectId !== projectFilter) return false;
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
       return true;
     });
-  }, [state.tasks, projectFilter, statusFilter]);
+  }, [state.tasks, visibleIds, projectFilter, statusFilter]);
 
   /* Gom nhiệm vụ theo ngày: dueDate là sự kiện chính, startDate là sự kiện phụ */
   const eventsByDay = useMemo(() => {
@@ -237,7 +244,7 @@ export function CalendarPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="w-44" aria-label="Lọc theo dự án">
             <option value="all">Tất cả dự án</option>
-            {state.projects.map((p) => (
+            {visibleProjectsList.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
               </option>

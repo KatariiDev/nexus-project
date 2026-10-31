@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,6 +12,7 @@ import { Checkbox } from '../../components/ui/controls';
 import { Avatar } from '../../components/ui/avatar';
 import { toast } from '../../components/ui/toast';
 import { newId } from '../../lib/utils';
+import { visibleProjects } from '../../lib/roles';
 import { dateInputToISO, isoToDateInput, nextTaskCode } from './helpers';
 
 const formSchema = z.object({
@@ -41,10 +42,13 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
 
+  // Chỉ chọn dự án mình đã tham gia (Admin thấy tất cả).
+  const visibleProjectsList = useMemo(() => visibleProjects(state.projects, me), [state.projects, me]);
+
   const getDefaults = (): FormValues => ({
     title: initial?.title ?? '',
     description: initial?.description ?? '',
-    projectId: initial?.projectId ?? defaultProjectId ?? state.projects[0]?.id ?? '',
+    projectId: initial?.projectId ?? defaultProjectId ?? visibleProjectsList[0]?.id ?? '',
     assigneeIds: initial?.assigneeIds ?? [],
     status: initial?.status ?? 'todo',
     priority: initial?.priority ?? 'medium',
@@ -138,7 +142,7 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
             <Field label="Dự án" error={errors.projectId?.message}>
               <Select {...register('projectId')}>
                 <option value="">— Chọn dự án —</option>
-                {state.projects.map((p) => (
+                {visibleProjectsList.map((p) => (
                   <option key={p.id} value={p.id}>{p.code} · {p.name}</option>
                 ))}
               </Select>

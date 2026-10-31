@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Search } from 'lucide-react';
 import { useApp, useCurrentUser } from '../../store/AppContext';
-import { assignableRoles, canDirectProjectAction, canManageMembers, canRequestProjects } from '../../lib/roles';
+import { assignableRoles, canDirectProjectAction, canManageMembers, canRequestProjects, visibleProjects } from '../../lib/roles';
 import { useUI } from './UIContext';
 import { Dialog, DialogHeader, DialogBody, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
@@ -30,9 +31,12 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
   const canDirect = canDirectProjectAction(me.role);
+  // Leader gửi yêu cầu tạo dự án thì Chủ dự án mặc định là chính mình, không đổi được.
+  const managerLocked = !canDirect;
   const f = useForm({ name: '', code: '', description: '', status: 'planning' as string, priority: 'medium' as string, managerId: state.currentUserId, startDate: '', endDate: '' });
   // Thành viên được chọn (mặc định có chính mình; bỏ tick để gỡ, tick để thêm).
   const [memberIds, setMemberIds] = useState<string[]>([state.currentUserId]);
+  const [memberQuery, setMemberQuery] = useState('');
   const toggleMember = (id: string) =>
     setMemberIds((s) => (s.includes(id) ? s.filter((m) => m !== id) : [...s, id]));
 
@@ -49,7 +53,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
       startDate: f.values.startDate || toISODate(new Date()),
       endDate: f.values.endDate || toISODate(new Date()),
       managerId: f.values.managerId,
-      // Người quản lý luôn là thành viên; các thành viên khác do người dùng tick chọn.
+      // Chủ dự án luôn là thành viên; các thành viên khác do người dùng tick chọn.
       memberIds: Array.from(new Set([...memberIds, f.values.managerId])),
       color: '#4F46E5',
     };
@@ -64,7 +68,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
       });
       toast('Tạo dự án thành công', f.values.name.trim());
     } else {
-      // Owner: gửi yêu cầu để Admin phê duyệt.
+      // Leader: gửi yêu cầu để Admin phê duyệt.
       dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
@@ -90,26 +94,47 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
       </div>
       <Field label="Mô tả"><Textarea value={f.values.description} onChange={(e) => f.set('description', e.target.value)} placeholder="Mô tả ngắn về dự án..." /></Field>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Trạng thái"><Select value={f.values.status} onChange={(e) => f.set('status', e.target.value)}>{PROJECT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</Select></Field>
+        <Field label="Trạng thái"><Select value={f.values.status} onChange={(e) => f.set('status', e.target.value)} disabled={!canDirect} title={canDirect ? undefined : 'Chỉ Admin mới chọn trạng thái khi tạo; yêu cầu tạo luôn bắt đầu ở "Lập kế hoạch"'}>{PROJECT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</Select></Field>
         <Field label="Ưu tiên"><Select value={f.values.priority} onChange={(e) => f.set('priority', e.target.value)}>{PRIORITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</Select></Field>
       </div>
       <div className="grid grid-cols-3 gap-4">
-        <Field label="Quản lý"><Select value={f.values.managerId} onChange={(e) => f.set('managerId', e.target.value)}>{state.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></Field>
+        <Field label="Chủ dự án (Leader)"><Select value={f.values.managerId} onChange={(e) => f.set('managerId', e.target.value)} disabled={managerLocked} title={managerLocked ? 'Bạn là Chủ dự án khi gửi yêu cầu tạo dự án' : undefined}>{state.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></Field>
         <Field label="Bắt đầu"><Input type="date" value={f.values.startDate} onChange={(e) => f.set('startDate', e.target.value)} /></Field>
         <Field label="Kết thúc"><Input type="date" value={f.values.endDate} onChange={(e) => f.set('endDate', e.target.value)} /></Field>
       </div>
       <Field label="Thành viên">
+        <div className="relative mb-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            value={memberQuery}
+            onChange={(e) => setMemberQuery(e.target.value)}
+            placeholder="Tìm thành viên theo tên, email..."
+          />
+        </div>
         <div className="max-h-36 overflow-y-auto rounded-md border border-input p-2">
-          {state.users.map((u) => (
-            <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
-              <Checkbox checked={memberIds.includes(u.id)} onChange={() => toggleMember(u.id)} />
-              <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
-              <span className="text-sm">
-                <span className="font-medium">{u.name}</span>
-                {u.id === state.currentUserId && <span className="text-muted-foreground"> (bạn)</span>}
-              </span>
-            </label>
-          ))}
+          {state.users
+            .filter((u) => {
+              const q = memberQuery.trim().toLowerCase();
+              if (!q) return true;
+              return `${u.name} ${u.email} ${u.title || ''}`.toLowerCase().includes(q);
+            })
+            .map((u) => (
+              <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
+                <Checkbox checked={memberIds.includes(u.id)} onChange={() => toggleMember(u.id)} />
+                <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
+                <span className="text-sm">
+                  <span className="font-medium">{u.name}</span>
+                  {u.id === state.currentUserId && <span className="text-muted-foreground"> (bạn)</span>}
+                </span>
+              </label>
+            ))}
+          {state.users.filter((u) => {
+            const q = memberQuery.trim().toLowerCase();
+            return q && `${u.name} ${u.email} ${u.title || ''}`.toLowerCase().includes(q);
+          }).length === 0 && memberQuery.trim() !== '' && (
+            <p className="px-2 py-3 text-sm text-muted-foreground">Không tìm thấy thành viên nào.</p>
+          )}
         </div>
       </Field>
       <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>{canDirect ? 'Tạo dự án' : 'Gửi yêu cầu'}</Button></DialogFooter>
@@ -120,11 +145,13 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
 function TaskQuickForm({ onDone }: { onDone: () => void }) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
-  const f = useForm({ title: '', projectId: state.projects[0]?.id ?? '', assigneeId: me.id, status: 'todo' as string, priority: 'medium' as string, dueDate: '' });
+  // Chỉ tạo nhiệm vụ trong dự án mình đã tham gia (Admin thấy tất cả).
+  const visibleProjectsList = useMemo(() => visibleProjects(state.projects, me), [state.projects, me]);
+  const f = useForm({ title: '', projectId: visibleProjectsList[0]?.id ?? '', assigneeId: me.id, status: 'todo' as string, priority: 'medium' as string, dueDate: '' });
 
   const submit = () => {
     if (!f.values.title.trim()) { f.setErrors({ title: 'Vui lòng nhập tiêu đề nhiệm vụ' }); return; }
-    const project = state.projects.find((p) => p.id === f.values.projectId);
+    const project = visibleProjectsList.find((p) => p.id === f.values.projectId);
     if (!project) return;
     const projectTasks = state.tasks.filter((t) => t.projectId === project.id);
     const code = nextTaskCode(project.code, projectTasks);
@@ -148,7 +175,7 @@ function TaskQuickForm({ onDone }: { onDone: () => void }) {
     <div className="flex flex-col gap-4">
       <Field label="Tiêu đề nhiệm vụ" error={f.errors.title}><Input value={f.values.title} onChange={(e) => f.set('title', e.target.value)} placeholder="VD: Thiết kế màn hình đăng nhập" /></Field>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Dự án"><Select value={f.values.projectId} onChange={(e) => f.set('projectId', e.target.value)}>{state.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+        <Field label="Dự án"><Select value={f.values.projectId} onChange={(e) => f.set('projectId', e.target.value)}>{visibleProjectsList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
         <Field label="Người thực hiện"><Select value={f.values.assigneeId} onChange={(e) => f.set('assigneeId', e.target.value)}>{state.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></Field>
       </div>
       <div className="grid grid-cols-3 gap-4">
@@ -200,20 +227,27 @@ function MemberQuickForm({ onDone }: { onDone: () => void }) {
 
 function DocQuickForm({ onDone }: { onDone: () => void }) {
   const { state, dispatch } = useApp();
+  const me = useCurrentUser();
   const navigate = useNavigate();
-  const f = useForm({ title: '', content: '', projectId: '' });
+  // Tài liệu luôn gắn với một dự án (tab Tài liệu ngoài đã bỏ) — chỉ chọn dự án mình đã tham gia.
+  const visibleProjectsList = useMemo(() => visibleProjects(state.projects, me), [state.projects, me]);
+  const f = useForm({ title: '', content: '', projectId: visibleProjectsList[0]?.id ?? '' });
 
   const submit = () => {
-    if (!f.values.title.trim()) { f.setErrors({ title: 'Vui lòng nhập tiêu đề tài liệu' }); return; }
-    dispatch({ type: 'DOC_ADD', title: f.values.title.trim(), content: f.values.content.trim(), projectId: f.values.projectId || undefined });
+    const errs: Record<string, string> = {};
+    if (!f.values.title.trim()) errs.title = 'Vui lòng nhập tiêu đề tài liệu';
+    if (!f.values.projectId) errs.projectId = 'Vui lòng chọn dự án cho tài liệu';
+    if (Object.keys(errs).length) { f.setErrors(errs); return; }
+    dispatch({ type: 'DOC_ADD', title: f.values.title.trim(), content: f.values.content.trim(), projectId: f.values.projectId });
     toast('Tạo tài liệu thành công', f.values.title.trim());
-    f.reset(); onDone(); navigate('/user/documents');
+    const pid = f.values.projectId;
+    f.reset(); onDone(); navigate(`/user/projects/${pid}`, { state: { tab: 'documents' } });
   };
 
   return (
     <div className="flex flex-col gap-4">
       <Field label="Tiêu đề" error={f.errors.title}><Input value={f.values.title} onChange={(e) => f.set('title', e.target.value)} placeholder="VD: Kế hoạch sprint 12" /></Field>
-      <Field label="Dự án liên quan (tùy chọn)"><Select value={f.values.projectId} onChange={(e) => f.set('projectId', e.target.value)}><option value="">Không liên kết dự án</option>{state.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+      <Field label="Dự án" error={f.errors.projectId}><Select value={f.values.projectId} onChange={(e) => f.set('projectId', e.target.value)}>{visibleProjectsList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
       <Field label="Nội dung"><Textarea rows={5} value={f.values.content} onChange={(e) => f.set('content', e.target.value)} placeholder="Nội dung tài liệu..." /></Field>
       <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>Tạo tài liệu</Button></DialogFooter>
     </div>

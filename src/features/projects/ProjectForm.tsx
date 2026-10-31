@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Search } from 'lucide-react';
 import { Dialog, DialogHeader, DialogBody, DialogFooter } from '../../components/ui/dialog';
 import { Field, Input, Textarea, Select } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
@@ -46,6 +47,13 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
   const canDirect = canDirectProjectAction(me.role);
   const [form, setForm] = useState<FormState | null>(null);
   const [errors, setErrors] = useState<Errors>({});
+  const [memberQuery, setMemberQuery] = useState('');
+
+  // Chỉ Chủ dự án + Admin được đổi trạng thái (khi sửa); khi tạo mới thì chỉ Admin
+  // tạo trực tiếp mới chọn trạng thái, Leader gửi yêu cầu luôn ở trạng thái "Lập kế hoạch".
+  const canChangeStatus = initial ? canDirect || initial.managerId === me.id : canDirect;
+  // Leader gửi yêu cầu tạo dự án thì Chủ dự án mặc định là chính mình.
+  const managerLocked = !initial && !canDirect;
 
   useEffect(() => {
     if (!open) return;
@@ -105,7 +113,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
     ) {
       e.code = 'Mã dự án đã tồn tại';
     }
-    if (!form.managerId) e.managerId = 'Vui lòng chọn người quản lý';
+    if (!form.managerId) e.managerId = 'Vui lòng chọn Chủ dự án';
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       e.endDate = 'Ngày kết thúc phải từ ngày bắt đầu trở đi';
     }
@@ -142,7 +150,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
       dispatch({ type: 'PROJECT_ADD', project });
       toast('Đã tạo dự án', `${project.code} · ${project.name}`);
     } else {
-      // Owner: gửi yêu cầu để Admin phê duyệt.
+      // Leader: gửi yêu cầu để Admin phê duyệt.
       dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
@@ -194,7 +202,12 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Trạng thái">
-            <Select value={form.status} onChange={(e) => set('status', e.target.value as ProjectStatus)}>
+            <Select
+              value={form.status}
+              onChange={(e) => set('status', e.target.value as ProjectStatus)}
+              disabled={!canChangeStatus}
+              title={canChangeStatus ? undefined : 'Chỉ Chủ dự án hoặc Admin mới được đổi trạng thái'}
+            >
               {PROJECT_STATUSES.map((s) => (
                 <option key={s.value} value={s.value}>
                   {s.label}
@@ -225,9 +238,14 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
           </Field>
         </div>
 
-        <Field label="Trưởng dự án (Leader) *" error={errors.managerId}>
-          <Select value={form.managerId} onChange={(e) => set('managerId', e.target.value)}>
-            <option value="">Chọn Trưởng dự án</option>
+        <Field label="Chủ dự án (Leader) *" error={errors.managerId}>
+          <Select
+            value={form.managerId}
+            onChange={(e) => set('managerId', e.target.value)}
+            disabled={managerLocked}
+            title={managerLocked ? 'Bạn là Chủ dự án khi gửi yêu cầu tạo dự án' : undefined}
+          >
+            <option value="">Chọn Chủ dự án</option>
             {state.users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name} {u.id === me.id ? '(Bạn)' : ''} · {u.title || 'Thành viên'}
@@ -237,17 +255,38 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
         </Field>
 
         <Field label="Thành viên">
+          <div className="relative mb-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              value={memberQuery}
+              onChange={(e) => setMemberQuery(e.target.value)}
+              placeholder="Tìm thành viên theo tên, email, chức danh..."
+            />
+          </div>
           <div className="max-h-44 overflow-y-auto rounded-md border border-input p-2">
-            {state.users.map((u) => (
-              <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
-                <Checkbox checked={form.memberIds.includes(u.id)} onChange={() => toggleMember(u.id)} />
-                <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
-                <span className="text-sm">
-                  <span className="font-medium">{u.name}</span>
-                  <span className="text-muted-foreground"> · {u.title || 'Thành viên'}</span>
-                </span>
-              </label>
-            ))}
+            {state.users
+              .filter((u) => {
+                const q = memberQuery.trim().toLowerCase();
+                if (!q) return true;
+                return `${u.name} ${u.email} ${u.title || ''}`.toLowerCase().includes(q);
+              })
+              .map((u) => (
+                <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
+                  <Checkbox checked={form.memberIds.includes(u.id)} onChange={() => toggleMember(u.id)} />
+                  <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
+                  <span className="text-sm">
+                    <span className="font-medium">{u.name}</span>
+                    <span className="text-muted-foreground"> · {u.title || 'Thành viên'}</span>
+                  </span>
+                </label>
+              ))}
+            {state.users.filter((u) => {
+              const q = memberQuery.trim().toLowerCase();
+              return q && `${u.name} ${u.email} ${u.title || ''}`.toLowerCase().includes(q);
+            }).length === 0 && memberQuery.trim() !== '' && (
+              <p className="px-2 py-3 text-sm text-muted-foreground">Không tìm thấy thành viên nào.</p>
+            )}
           </div>
         </Field>
 

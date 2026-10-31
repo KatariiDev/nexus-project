@@ -21,11 +21,9 @@ import { cn } from '../../lib/utils';
 type RoleTone = 'purple' | 'primary' | 'info' | 'muted';
 
 const roleTone: Record<WorkspaceRole, RoleTone> = {
-  owner: 'purple',
   admin: 'primary',
-  manager: 'info',
+  leader: 'info',
   member: 'muted',
-  viewer: 'muted',
 };
 
 function RoleBadge({ role }: { role: WorkspaceRole }) {
@@ -187,7 +185,7 @@ export function TeamPage() {
                       <Select
                         value={u.role}
                         disabled={isSelf || !canInvite}
-                        title={isSelf ? 'Bạn không thể tự thay đổi vai trò của chính mình' : canInvite ? 'Đổi vai trò' : 'Chỉ Admin/Owner mới được đổi vai trò'}
+                        title={isSelf ? 'Bạn không thể tự thay đổi vai trò của chính mình' : canInvite ? 'Đổi vai trò' : 'Chỉ Admin mới được đổi vai trò'}
                         onChange={(e) => handleRoleChange(u, e.target.value as WorkspaceRole)}
                         className="h-8 text-xs"
                         aria-label={`Vai trò của ${u.name}`}

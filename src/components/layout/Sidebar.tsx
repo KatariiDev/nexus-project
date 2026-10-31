@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Briefcase, KanbanSquare, ListChecks, CalendarDays, Milestone,
-  Users, FileText, BarChart3, Bell, Settings, ChevronsLeft, ChevronsRight, Hexagon,
+  LayoutDashboard, Briefcase, ListChecks, CalendarDays, Milestone,
+  Users, BarChart3, Bell, Settings, ChevronsLeft, ChevronsRight, Hexagon,
   ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -12,12 +12,10 @@ import { Avatar } from '../ui/avatar';
 export const NAV_ITEMS = [
   { to: '/user', label: 'Tổng quan', icon: LayoutDashboard, end: true },
   { to: '/user/projects', label: 'Dự án', icon: Briefcase },
-  { to: '/user/tasks', label: 'Nhiệm vụ', icon: KanbanSquare },
   { to: '/user/my-tasks', label: 'Công việc của tôi', icon: ListChecks },
   { to: '/user/calendar', label: 'Lịch', icon: CalendarDays },
   { to: '/user/timeline', label: 'Timeline', icon: Milestone },
   { to: '/user/team', label: 'Nhóm & Nhân sự', icon: Users },
-  { to: '/user/documents', label: 'Tài liệu', icon: FileText },
   { to: '/user/reports', label: 'Báo cáo', icon: BarChart3 },
   { to: '/user/notifications', label: 'Thông báo', icon: Bell },
   { to: '/user/settings', label: 'Cài đặt', icon: Settings },

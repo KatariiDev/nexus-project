@@ -1,16 +1,17 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
+import { useEffect } from 'react';
 import { Hexagon } from 'lucide-react';
 import { useApp, useCurrentUser } from './store/AppContext';
+import { useUI } from './components/layout/UIContext';
 import { canAccessAdmin } from './lib/roles';
 import { AppShell } from './components/layout/AppShell';
 import { LoginPage, RegisterPage, ForgotPasswordPage } from './features/auth/AuthPages';
 import { DashboardPage } from './features/dashboard/DashboardPage';
 import { ProjectsPage, ProjectDetailPage } from './features/projects/ProjectsPage';
-import { MyTasksPage, TasksPage } from './features/tasks/TasksPage';
+import { MyTasksPage } from './features/tasks/TasksPage';
 import { CalendarPage } from './features/calendar/CalendarPage';
 import { GanttPage } from './features/timeline/GanttPage';
 import { TeamPage } from './features/team/TeamPage';
-import { DocumentsPage } from './features/documents/DocumentsPage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { NotificationsPage } from './features/notifications/NotificationsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
@@ -59,6 +60,20 @@ const LEGACY_PREFIXES = [
   'projects', 'tasks', 'my-tasks', 'calendar', 'timeline',
   'team', 'documents', 'reports', 'notifications', 'settings',
 ];
+
+/**
+ * Deep link cũ tới một nhiệm vụ (vd: link trong thông báo `/user/tasks/<id>`):
+ * mở drawer chi tiết nhiệm vụ rồi chuyển về Tổng quan.
+ * (Trang danh sách Nhiệm vụ `/user/tasks` đã bỏ — chuyển về `/user/projects`.)
+ */
+function TaskDeepLink() {
+  const { openTask } = useUI();
+  const { id } = useParams();
+  useEffect(() => {
+    if (id) openTask(id);
+  }, [id, openTask]);
+  return <Navigate to="/user" replace />;
+}
 
 function Fallback() {
   const loc = useLocation();
@@ -111,12 +126,13 @@ export default function App() {
           <Route index element={<DashboardPage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="projects/:id" element={<ProjectDetailPage />} />
-          <Route path="tasks" element={<TasksPage />} />
+          <Route path="tasks" element={<Navigate to="/user/projects" replace />} />
+          <Route path="tasks/:id" element={<TaskDeepLink />} />
           <Route path="my-tasks" element={<MyTasksPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="timeline" element={<GanttPage />} />
           <Route path="team" element={<TeamPage />} />
-          <Route path="documents" element={<DocumentsPage />} />
+          <Route path="documents" element={<Navigate to="/user/projects" replace />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="settings" element={<SettingsPage />} />

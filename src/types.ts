@@ -1,4 +1,4 @@
-export type WorkspaceRole = 'owner' | 'admin' | 'manager' | 'member' | 'viewer';
+export type WorkspaceRole = 'admin' | 'leader' | 'member';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
@@ -112,7 +112,7 @@ export interface Notification {
   createdAt: string;
 }
 
-/** Yêu cầu phê duyệt liên quan đến dự án (member gửi → Owner/Admin duyệt). */
+/** Yêu cầu phê duyệt liên quan đến dự án (Leader gửi → Admin duyệt). */
 export type ProjectRequestType = 'create_project' | 'pause_project' | 'delete_project';
 export type ProjectRequestStatus = 'pending' | 'approved' | 'rejected';
 
@@ -160,6 +160,14 @@ export interface Document {
   authorId: string;
   createdAt: string;
   updatedAt: string;
+  /** Tệp đính kèm (tab Tài liệu trong dự án): đường dẫn trong bucket `project-documents`. */
+  fileUrl?: string;
+  /** Tên file gốc hiển thị (VD: "bao-cao.pdf"). */
+  fileName?: string;
+  /** Dung lượng file (bytes). */
+  fileSize?: number;
+  /** MIME type của file (VD: "application/pdf"). */
+  fileType?: string;
 }
 
 export const TASK_STATUSES: { value: TaskStatus; label: string }[] = [
@@ -185,11 +193,9 @@ export const PRIORITIES: { value: Priority; label: string }[] = [
 ];
 
 export const WORKSPACE_ROLES: { value: WorkspaceRole; label: string; desc: string }[] = [
-  { value: 'admin', label: 'Admin', desc: 'Quản trị hệ thống và phê duyệt dự án' },
-  { value: 'member', label: 'Thành viên', desc: 'Đề xuất dự án để làm Leader, tham gia dự án & làm nhiệm vụ' },
-  { value: 'manager', label: 'Leader', desc: 'Trưởng dự án phụ trách' },
-  { value: 'owner', label: 'Admin', desc: 'Toàn quyền workspace' },
-  { value: 'viewer', label: 'Viewer', desc: 'Chỉ xem dữ liệu' },
+  { value: 'admin', label: 'Admin', desc: 'Quản trị toàn hệ thống, phê duyệt dự án' },
+  { value: 'leader', label: 'Leader', desc: 'Chủ dự án: yêu cầu tạo dự án, quản lý dự án của mình' },
+  { value: 'member', label: 'Member', desc: 'Tham gia dự án đã join & làm nhiệm vụ' },
 ];
 
 export function taskStatusLabel(s: TaskStatus): string {

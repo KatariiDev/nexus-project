@@ -7,14 +7,14 @@ Nền tảng quản lý dự án chuyên nghiệp cho doanh nghiệp, đội nh�
 ## Tính năng
 
 - **Tổng quan (Dashboard):** lời chào, KPI, biểu đồ tiến độ 14 ngày, phân bổ trạng thái, dự án gần đây, nhiệm vụ sắp đến hạn, hoạt động nhóm, workload thành viên.
-- **Dự án:** CRUD, lưu trữ/xóa (có xác nhận), Grid/List view, lọc theo trạng thái/ưu tiên/quản lý, tìm kiếm, sắp xếp, phân trang, theo dõi ngân sách, tiến độ tự động.
-- **Nhiệm vụ:** Kanban kéo thả (dnd-kit), Table view (sắp xếp, lọc, chọn nhiều + thao tác hàng loạt), Công việc của tôi (nhóm Quá hạn/Hôm nay/Sắp đến hạn/Hoàn thành), Task Detail Drawer (mô tả, checklist, phụ thuộc, bình luận, đính kèm, lịch sử).
+- **Dự án:** CRUD, lưu trữ/xóa (có xác nhận), Grid/List view, lọc theo trạng thái/ưu tiên/chủ dự án/phạm vi (Tất cả / Của tôi / Chưa tham gia), tìm kiếm, sắp xếp, phân trang, theo dõi ngân sách, tiến độ tự động. Chi tiết dự án có 4 tab: Tổng quan / Nhiệm vụ / Tài liệu / Hoạt động. Thành viên chỉ thấy dự án đã tham gia (Admin thấy tất cả); nút "Xin tham gia" gửi thông báo tới Chủ dự án.
+- **Nhiệm vụ:** Kanban kéo thả (dnd-kit) và Table view trong tab Nhiệm vụ của từng dự án (sắp xếp, lọc, chọn nhiều + thao tác hàng loạt), Công việc của tôi (nhóm Quá hạn/Hôm nay/Sắp đến hạn/Hoàn thành), Task Detail Drawer (mô tả, checklist, phụ thuộc, bình luận, đính kèm, lịch sử).
 - **Lịch:** xem Tháng/Tuần/Ngày, lọc theo dự án/trạng thái, tạo nhanh nhiệm vụ từ ô ngày.
 - **Timeline (Gantt):** scale Ngày/Tuần/Tháng, thanh tiến độ, tô nổi bật quá hạn, đường phụ thuộc.
-- **Nhóm & Nhân sự:** danh sách, workload, mời thành viên, phân quyền (Owner/Admin/Manager/Member/Viewer).
+- **Nhóm & Nhân sự:** danh sách, workload, mời thành viên, phân quyền (Admin/Leader/Member — Leader là Chủ dự án).
 - **Thông báo:** theo sự kiện (giao việc, sắp đến hạn, quá hạn, nhắc tên...), đánh dấu đã đọc.
 - **Báo cáo:** KPI + biểu đồ từ dữ liệu thật, lọc theo thời gian/dự án/thành viên, xuất CSV.
-- **Tài liệu:** CRUD, liên kết dự án.
+- **Tài liệu:** tab con trong chi tiết dự án — tài liệu chữ (CRUD) + kéo-thả upload tệp (ảnh, PDF, Word, Excel, video) vào bucket `project-documents`.
 - **Tìm kiếm toàn cục:** `Ctrl/Cmd + K` tìm dự án/nhiệm vụ/thành viên/tài liệu.
 - **Tạo nhanh:** nút "Tạo mới" cho dự án/nhiệm vụ/thành viên/tài liệu.
 - **Giao diện:** Light/Dark mode, sidebar thu gọn, responsive, tiếng Việt.
@@ -90,7 +90,7 @@ supabase/migrations/    # schema + RLS policies + bootstrap workspace
 
 ## Phân quyền
 
-RLS cấu hình theo workspace/dự án/vai trò: Viewer chỉ đọc; Member tạo/sửa nhiệm vụ; Manager trở lên quản lý dự án; Admin/Owner quản trị workspace. Xem chi tiết trong `20261011000001_rls.sql`.
+Vai trò workspace chỉ còn 3: **Admin / Leader / Member** (Leader = Chủ dự án, người tạo dự án). Chỉ Leader của dự án + Admin được đổi trạng thái dự án; duyệt nhiệm vụ = Admin + Leader của dự án đó; gán vai trò workspace = chỉ Admin. Thành viên chỉ thấy dự án đã tham gia (Admin thấy tất cả). RLS ở DB vẫn dùng các giá trị vai trò cũ trong giai đoạn chuyển đổi; FE map giá trị cũ về `member` (fail closed). Xem chi tiết trong `supabase/migrations/20261018000002_rls_and_storage.sql`.
 
 ## Kiến trúc dữ liệu
 
