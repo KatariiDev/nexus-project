@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Briefcase, ListTodo, Mail, UserPlus, Users, ShieldCheck } from 'lucide-react';
+import { Briefcase, ListTodo, Mail, Users, ShieldCheck } from 'lucide-react';
 import { useApp, useCurrentUser } from '../../store/AppContext';
-import { useUI } from '../../components/layout/UIContext';
 import { EmptyState, PageHeader } from '../../components/ui/feedback';
-import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Avatar } from '../../components/ui/avatar';
 import { Select } from '../../components/ui/input';
@@ -32,7 +30,6 @@ function RoleBadge({ role }: { role: WorkspaceRole }) {
 
 export function TeamPage() {
   const { state, dispatch, refresh } = useApp();
-  const { setQuickCreateTab, setQuickCreateOpen } = useUI();
   const me = useCurrentUser();
 
   const stats = useMemo(() => {
@@ -68,10 +65,6 @@ export function TeamPage() {
     }
   };
 
-  const inviteMember = () => {
-    setQuickCreateTab('member');
-    setQuickCreateOpen(true);
-  };
   const canInvite = canManageMembers(me.role);
   const allowedRoles = assignableRoles(me.role);
 
@@ -80,28 +73,13 @@ export function TeamPage() {
       <PageHeader
         title="Nhóm & Nhân sự"
         desc={`${state.users.length} thành viên trong workspace`}
-        actions={
-          canInvite ? (
-            <Button onClick={inviteMember}>
-              <UserPlus className="h-4 w-4" />
-              Mời thành viên
-            </Button>
-          ) : undefined
-        }
       />
 
       {state.users.length === 0 ? (
         <EmptyState
           icon={<Users className="h-6 w-6" />}
           title="Chưa có thành viên"
-          desc="Mời thành viên đầu tiên vào workspace để bắt đầu cộng tác."
-          action={
-            canInvite ? (
-              <Button onClick={inviteMember}>
-                <UserPlus className="h-4 w-4" /> Mời thành viên
-              </Button>
-            ) : undefined
-          }
+          desc="Tạo dự án đầu tiên rồi mời thành viên từ trang chi tiết dự án."
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
