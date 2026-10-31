@@ -33,7 +33,7 @@ import { Progress } from '../../components/ui/progress';
 import { EmptyState } from '../../components/ui/feedback';
 import { dueLabel, greeting, isOverdue, timeAgo, todayLong } from '../../lib/format';
 import { TASK_STATUSES } from '../../types';
-import type { TaskStatus } from '../../types';
+import type { ActivityLog, TaskStatus } from '../../types';
 import { ProjectForm } from '../projects/ProjectForm';
 import { visibleProjects, canDirectProjectAction, canRequestProjects } from '../../lib/roles';
 import { cn } from '../../lib/utils';
@@ -123,30 +123,58 @@ export function DashboardPage() {
   );
 
   const recentActivities = useMemo(() => {
-    // ActivityLog chỉ mang entityType/entityId: dự án thì lọc trực tiếp,
-    // nhiệm vụ thì tra projectId qua task, còn lại (thành viên/tài liệu...) giữ nguyên.
+    // Admin thấy tất cả. Member chỉ thấy hoạt động trong dự án đã tham gia:
+    // dự án lọc trực tiếp; nhiệm vụ/bình luận tra projectId qua task;
+    // tài liệu tra projectId của tài liệu; loại khác (thành viên...) không gắn
+    // dự án nào nên ẩn với member. Không tra được thì ẩn (fail closed).
+    if (user.isSuperAdmin || user.role === 'admin') {
+      return [...state.activityLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
+    }
     const taskProject = new Map(state.tasks.map((t) => [t.id, t.projectId]));
+    const commentTask = new Map(state.comments.map((c) => [c.id, c.taskId]));
+    const docProject = new Map(state.documents.map((d) => [d.id, d.projectId]));
+    const projectOf = (a: ActivityLog): string | undefined => {
+      if (a.entityType === 'project') return a.entityId;
+      if (a.entityType === 'task') return taskProject.get(a.entityId);
+      if (a.entityType === 'comment') {
+        const taskId = commentTask.get(a.entityId);
+        return taskId ? taskProject.get(taskId) : undefined;
+      }
+      if (a.entityType === 'document') return docProject.get(a.entityId);
+      return undefined;
+    };
     return [...state.activityLogs]
       .filter((a) => {
-        if (a.entityType === 'project') return visibleIds.has(a.entityId);
-        if (a.entityType === 'task') {
-          const pid = taskProject.get(a.entityId);
-          return pid ? visibleIds.has(pid) : true;
-        }
-        return true;
+        const pid = projectOf(a);
+        return pid !== undefined && visibleIds.has(pid);
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, 6);
-  }, [state.activityLogs, state.tasks, visibleIds]);
+  }, [state.activityLogs, state.tasks, state.comments, state.documents, visibleIds, user]);
 
-  const topWorkload = useMemo(
-    () =>
-      [...state.users]
-        .filter((u) => u.status === 'active')
-        .sort((a, b) => (b.workload ?? 0) - (a.workload ?? 0))
-        .slice(0, 4),
-    [state.users],
-  );
+  const topWorkload = useMemo(() => {
+    // Khối lượng chỉ tính từ nhiệm vụ trong dự án mình thấy (Admin thấy tất cả):
+    // 10 nhiệm vụ đang mở = 100%, giống cách tính workload ở lib/db.ts.
+    // Member chỉ thấy các thành viên trong dự án mình đã tham gia.
+    const isAdminLike = user.isSuperAdmin || user.role === 'admin';
+    const openByUser = new Map<string, number>();
+    for (const t of visibleTasks) {
+      if (t.status === 'done') continue;
+      for (const uid of t.assigneeIds) openByUser.set(uid, (openByUser.get(uid) ?? 0) + 1);
+    }
+    const memberIds = new Set<string>();
+    if (!isAdminLike) {
+      for (const p of visibleProjectsList) {
+        memberIds.add(p.managerId);
+        for (const id of p.memberIds) memberIds.add(id);
+      }
+    }
+    return [...state.users]
+      .filter((u) => u.status === 'active' && (isAdminLike || memberIds.has(u.id)))
+      .map((u) => ({ ...u, workload: Math.min(100, (openByUser.get(u.id) ?? 0) * 10) }))
+      .sort((a, b) => (b.workload ?? 0) - (a.workload ?? 0))
+      .slice(0, 4);
+  }, [state.users, visibleProjectsList, visibleTasks, user]);
 
   const statCards = [
     { label: 'Dự án đang hoạt động', value: stats.activeProjects, icon: <FolderKanban className="h-5 w-5" />, iconClass: 'bg-primary/10 text-primary' },
@@ -176,7 +204,7 @@ export function DashboardPage() {
               setQuickCreateOpen(true);
             }}
           >
-            <Plus className="h-4 w-4" /> Tạo nhiệm vụ
+            <Plus className="h-4 w-4" /> Tạo nhanh
           </Button>
         </div>
       </div>
@@ -226,7 +254,7 @@ export function DashboardPage() {
             <CardDescription>Nhiệm vụ theo từng trạng thái</CardDescription>
           </CardHeader>
           <CardContent>
-            {state.tasks.length === 0 ? (
+            {visibleTasks.length === 0 ? (
               <EmptyState icon={<ListTodo className="h-6 w-6" />} title="Chưa có dữ liệu" desc="Biểu đồ sẽ hiển thị khi có nhiệm vụ." />
             ) : (
               <>
@@ -268,7 +296,11 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-1 p-2">
             {recentProjects.length === 0 && (
-              <EmptyState icon={<FolderKanban className="h-6 w-6" />} title="Chưa có dự án" desc="Tạo dự án đầu tiên để bắt đầu." />
+              <EmptyState
+                icon={<FolderKanban className="h-6 w-6" />}
+                title="Chưa có dự án"
+                desc={canCreateProject ? 'Tạo dự án đầu tiên để bắt đầu.' : 'Bạn chưa tham gia dự án nào.'}
+              />
             )}
             {recentProjects.map((p) => {
               const progress = projectProgress(state.tasks, p.id);
@@ -368,6 +400,9 @@ export function DashboardPage() {
             <CardDescription>Thành viên đang chịu tải lớn nhất</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
+            {topWorkload.length === 0 && (
+              <EmptyState icon={<ListTodo className="h-6 w-6" />} title="Chưa có dữ liệu" desc="Chưa có thành viên nào trong dự án của bạn." />
+            )}
             {topWorkload.map((u) => (
               <div key={u.id} className="flex items-center gap-3">
                 <Avatar name={u.name} avatarUrl={u.avatarUrl} size="sm" />

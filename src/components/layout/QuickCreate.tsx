@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useApp, useCurrentUser } from '../../store/AppContext';
-import { assignableRoles, canDirectProjectAction, canManageMembers, canRequestProjects, visibleProjects } from '../../lib/roles';
+import { canDirectProjectAction, canRequestProjects, visibleProjects } from '../../lib/roles';
 import { useUI } from './UIContext';
 import { Dialog, DialogHeader, DialogBody, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
@@ -14,7 +14,7 @@ import { toast } from '../ui/toast';
 import { newId } from '../../lib/utils';
 import { nextTaskCode } from '../../features/tasks/helpers';
 import { toISODate } from '../../lib/format';
-import { PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, WORKSPACE_ROLES, type Priority, type ProjectStatus, type TaskStatus, type WorkspaceRole } from '../../types';
+import { PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, type Priority, type ProjectStatus, type TaskStatus } from '../../types';
 
 function useForm<T extends Record<string, string>>(initial: T) {
   const [values, setValues] = useState<T>(initial);
@@ -188,43 +188,6 @@ function TaskQuickForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function MemberQuickForm({ onDone }: { onDone: () => void }) {
-  const { dispatch } = useApp();
-  const me = useCurrentUser();
-  const allowed = assignableRoles(me.role);
-  const f = useForm({ email: '', role: allowed[0] ?? 'member' });
-
-  const submit = () => {
-    const errs: Record<string, string> = {};
-    if (!/^\S+@\S+\.\S+$/.test(f.values.email)) errs.email = 'Email không hợp lệ';
-    if (!allowed.includes(f.values.role as WorkspaceRole)) errs.role = 'Bạn không được phép gán vai trò này';
-    if (Object.keys(errs).length) { f.setErrors(errs); return; }
-    void dispatch({ type: 'USER_ADD', email: f.values.email.trim(), role: f.values.role as WorkspaceRole })
-      .then(() => {
-        toast('Đã thêm thành viên', f.values.email.trim());
-        f.reset(); onDone();
-      });
-  };
-
-  const roleMeta = (v: string) => WORKSPACE_ROLES.find((r) => r.value === v);
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Field label="Email" error={f.errors.email}><Input value={f.values.email} onChange={(e) => f.set('email', e.target.value)} placeholder="email@congty.vn" /></Field>
-      <p className="-mt-2 text-xs text-muted-foreground">Người này phải đã đăng ký tài khoản Nexus trước.</p>
-      <Field label="Vai trò" error={f.errors.role}>
-        <Select value={f.values.role} onChange={(e) => f.set('role', e.target.value)}>
-          {allowed.map((v) => {
-            const m = roleMeta(v);
-            return <option key={v} value={v}>{m?.label} — {m?.desc}</option>;
-          })}
-        </Select>
-      </Field>
-      <DialogFooter><Button variant="outline" onClick={onDone}>Hủy</Button><Button onClick={submit}>Thêm thành viên</Button></DialogFooter>
-    </div>
-  );
-}
-
 function DocQuickForm({ onDone }: { onDone: () => void }) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
@@ -259,11 +222,10 @@ export function QuickCreate() {
   const me = useCurrentUser();
   const close = () => setQuickCreateOpen(false);
   const showProject = canRequestProjects(me.role);
-  const showMember = canManageMembers(me.role);
 
   return (
     <Dialog open={quickCreateOpen} onClose={close} wide>
-      <DialogHeader title="Tạo mới nhanh" desc="Tạo dự án, nhiệm vụ, mời thành viên hoặc tài liệu mới." onClose={close} />
+      <DialogHeader title="Tạo mới nhanh" desc="Tạo dự án, nhiệm vụ hoặc tài liệu mới." onClose={close} />
       <DialogBody>
         <Tabs
           value={quickCreateTab}
@@ -271,14 +233,12 @@ export function QuickCreate() {
           tabs={[
             { value: 'task', label: 'Nhiệm vụ' },
             ...(showProject ? [{ value: 'project', label: 'Dự án' }] : []),
-            ...(showMember ? [{ value: 'member', label: 'Thành viên' }] : []),
             { value: 'document', label: 'Tài liệu' },
           ]}
           className="mb-5"
         />
         {quickCreateTab === 'task' && <TaskQuickForm onDone={close} />}
         {quickCreateTab === 'project' && showProject && <ProjectQuickForm onDone={close} />}
-        {quickCreateTab === 'member' && showMember && <MemberQuickForm onDone={close} />}
         {quickCreateTab === 'document' && <DocQuickForm onDone={close} />}
       </DialogBody>
     </Dialog>
