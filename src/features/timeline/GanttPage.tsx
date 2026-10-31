@@ -19,7 +19,7 @@ import { EmptyState, PageHeader } from '../../components/ui/feedback';
 import { Tabs } from '../../components/ui/tabs';
 import { Select } from '../../components/ui/input';
 import { isOverdue } from '../../lib/format';
-import { visibleProjects } from '../../lib/roles';
+import { visibleProjects, canAccessAdmin } from '../../lib/roles';
 import { cn } from '../../lib/utils';
 
 type Scale = 'day' | 'week' | 'month';
@@ -46,6 +46,13 @@ export function GanttPage() {
   // Member chỉ thấy dự án đã tham gia (Admin thấy tất cả).
   const visibleProjectsList = useMemo(() => visibleProjects(state.projects, me), [state.projects, me]);
   const visibleIds = useMemo(() => new Set(visibleProjectsList.map((p) => p.id)), [visibleProjectsList]);
+  const isAdmin = canAccessAdmin(me.role, me.isSuperAdmin);
+
+  /* Số nhiệm vụ trong các dự án mình thấy (chưa lọc ngày) — dùng cho trạng thái trống. */
+  const visibleTasksCount = useMemo(
+    () => state.tasks.filter((t) => visibleIds.has(t.projectId)).length,
+    [state.tasks, visibleIds],
+  );
 
   /* Chỉ lấy task có đủ ngày bắt đầu và hạn, có ngày hợp lệ */
   const ganttTasks = useMemo(() => {
@@ -154,7 +161,7 @@ export function GanttPage() {
               onChange={setScale}
             />
             <Select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="w-44" aria-label="Lọc theo dự án">
-              <option value="all">Tất cả dự án</option>
+              <option value="all">{isAdmin ? 'Tất cả dự án' : 'Tất cả dự án đã tham gia'}</option>
               {visibleProjectsList.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -186,12 +193,14 @@ export function GanttPage() {
 
       {!range || ganttTasks.length === 0 ? (
         <EmptyState
-          icon={state.tasks.length === 0 ? <CalendarRange className="h-6 w-6" /> : <BarChart3 className="h-6 w-6" />}
+          icon={visibleTasksCount === 0 ? <CalendarRange className="h-6 w-6" /> : <BarChart3 className="h-6 w-6" />}
           title="Chưa có dữ liệu timeline"
           desc={
-            state.tasks.length === 0
-              ? 'Chưa có nhiệm vụ nào trong hệ thống.'
-              : 'Các nhiệm vụ hiện tại chưa có đủ ngày bắt đầu và ngày đến hạn để vẽ biểu đồ.'
+            visibleProjectsList.length === 0
+              ? 'Bạn chưa tham gia dự án nào.'
+              : visibleTasksCount === 0
+                ? 'Chưa có nhiệm vụ nào trong các dự án của bạn.'
+                : 'Các nhiệm vụ hiện tại chưa có đủ ngày bắt đầu và ngày đến hạn để vẽ biểu đồ.'
           }
         />
       ) : (
