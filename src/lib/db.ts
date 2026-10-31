@@ -817,13 +817,18 @@ export async function persistAction(
       // Báo kết quả cho người yêu cầu.
       if (req.requestedBy !== ctx.userId) {
         const verb = action.approve ? 'đã được duyệt' : 'đã bị từ chối';
+        // Link tới chi tiết dự án khi dự án còn tồn tại sau khi xử lý
+        // (tạo/tạm dừng được duyệt, hoặc tạm dừng/xóa bị từ chối);
+        // còn không (tạo bị từ chối / xóa đã duyệt) thì về danh sách dự án.
+        const detailProjectId =
+          reviewedProject?.id ?? (action.approve ? undefined : req.projectId);
         const { error: nErr } = await sb.from('notifications').insert({
           id: newId(),
           user_id: req.requestedBy,
           kind: 'project',
           title: `Yêu cầu ${verb}`,
           body: `Yêu cầu "${title}" của bạn ${verb}${action.note ? `: ${action.note}` : '.'}`,
-          link: '/user/projects',
+          link: detailProjectId ? `/user/projects/${detailProjectId}` : '/user/projects',
         });
         if (nErr) throw nErr;
       }

@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Bell, Briefcase, CheckCheck, Clock, MessageSquare, UserPlus, Users } from 'lucide-react';
-import { useApp } from '../../store/AppContext';
+import { taskById, useApp, useCurrentUser } from '../../store/AppContext';
 import { useUI } from '../../components/layout/UIContext';
 import { EmptyState, PageHeader } from '../../components/ui/feedback';
 import { Tabs } from '../../components/ui/tabs';
 import { Button } from '../../components/ui/button';
 import { timeAgo } from '../../lib/format';
 import { cn } from '../../lib/utils';
+import { canAccessAdmin, visibleProjects } from '../../lib/roles';
+import { toast } from '../../components/ui/toast';
 import type { Notification } from '../../types';
 
 type Tab = 'all' | 'unread';
@@ -25,6 +27,7 @@ const kindMeta: Record<Notification['kind'], { icon: React.ReactNode; tone: stri
 export function NotificationsPage() {
   const { state, dispatch } = useApp();
   const { openTask } = useUI();
+  const me = useCurrentUser();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('all');
 
@@ -37,15 +40,56 @@ export function NotificationsPage() {
   const unreadCount = mine.filter((n) => !n.read).length;
   const shown = tab === 'all' ? mine : mine.filter((n) => !n.read);
 
+  /** Id các dự án người này được thấy — dùng để kiểm tra nhiệm vụ có mở được không. */
+  const visibleProjectIds = useMemo(
+    () => new Set(visibleProjects(state.projects, me).map((p) => p.id)),
+    [state.projects, me],
+  );
+
+  /**
+   * Mở thông báo về nhiệm vụ: tới chi tiết dự án của nó (tab Nhiệm vụ)
+   * rồi mở drawer chi tiết nhiệm vụ ngay để thấy rõ nhiệm vụ vừa trỏ tới.
+   * Nhiệm vụ không tồn tại hoặc nằm ngoài dự án mình được thấy thì báo
+   * rõ và ở lại trang Thông báo, không mở drawer trống.
+   */
+  const openTaskNotification = (taskId: string) => {
+    const task = taskById(state.tasks, taskId);
+    if (!task || !visibleProjectIds.has(task.projectId)) {
+      toast(
+        'Không mở được nhiệm vụ này',
+        'Nhiệm vụ có thể đã bị xóa hoặc bạn không còn quyền xem.',
+        'error',
+      );
+      return;
+    }
+    navigate(`/user/projects/${task.projectId}`, { state: { tab: 'tasks' } });
+    openTask(task.id);
+  };
+
   const openNotification = (n: Notification) => {
     dispatch({ type: 'NOTIF_READ', id: n.id });
     if (!n.link) return;
-    const taskMatch = n.link.match(/^\/tasks\/([^/]+)$/);
+    // Link nhiệm vụ: dạng hiện tại `/user/tasks/<id>` và dạng cũ `/tasks/<id>`.
+    const taskMatch = n.link.match(/^\/(?:user\/)?tasks\/([^/?#]+)$/);
     if (taskMatch) {
-      openTask(taskMatch[1]);
-    } else {
-      navigate(n.link);
+      openTaskNotification(taskMatch[1]);
+      return;
     }
+    // Link khu vực Admin (vd: thông báo yêu cầu cần phê duyệt): chỉ Admin mở được.
+    if (n.link.startsWith('/admin/')) {
+      if (canAccessAdmin(me.role, me.isSuperAdmin)) {
+        navigate(n.link);
+      } else {
+        toast(
+          'Chỉ Admin mới xem được trang này',
+          'Yêu cầu này cần Admin phê duyệt — bạn có thể xem dự án trong danh sách dự án.',
+          'info',
+        );
+        navigate('/user/projects');
+      }
+      return;
+    }
+    navigate(n.link);
   };
 
   return (
