@@ -6,6 +6,7 @@ import {
   Clock, GripVertical, Inbox, Plus, Search, SquareKanban, Table as TableIcon, Trash2,
 } from 'lucide-react';
 import { projectById, useApp, useCurrentUser, userById } from '../../store/AppContext';
+import { visibleProjects } from '../../lib/roles';
 import { useUI } from '../../components/layout/UIContext';
 import type { Priority, Task, TaskStatus, User } from '../../types';
 import { PRIORITIES, TASK_STATUSES, priorityLabel, taskStatusLabel } from '../../types';
@@ -364,23 +365,29 @@ function TaskTable({ tasks, onOpenTask }: { tasks: Task[]; onOpenTask: (id: stri
   );
 }
 
-/* ---------------- TasksPage ---------------- */
+/* ---------------- ProjectTaskBoard ---------------- */
 
-export function TasksPage() {
+/**
+ * Bảng nhiệm vụ của MỘT dự án (Kanban + Bảng) — dùng trong tab Nhiệm vụ
+ * của chi tiết dự án. Tab Nhiệm vụ chính ngoài sidebar đã bỏ.
+ */
+export function ProjectTaskBoard({ projectId }: { projectId: string }) {
   const { state, dispatch } = useApp();
   const { openTask } = useUI();
+  const me = useCurrentUser();
   const [view, setView] = useState<'kanban' | 'table'>('kanban');
-  const [projectFilter, setProjectFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
 
+  const project = projectById(state.projects, projectId);
+  const canAdd = !!project && (me.isSuperAdmin || me.role === 'admin' || project.memberIds.includes(me.id) || project.managerId === me.id);
+
   const tasks = useMemo(() => {
-    let list = state.tasks;
-    if (projectFilter !== 'all') list = list.filter((t) => t.projectId === projectFilter);
+    let list = state.tasks.filter((t) => t.projectId === projectId);
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((t) => t.title.toLowerCase().includes(q) || t.code.toLowerCase().includes(q));
     return list;
-  }, [state.tasks, projectFilter, search]);
+  }, [state.tasks, projectId, search]);
 
   const handleDragEnd = (e: DragEndEvent) => {
     const id = String(e.active.id);
@@ -391,20 +398,8 @@ export function TasksPage() {
     toast('Đã chuyển trạng thái', `${task.code} → ${taskStatusLabel(overStatus as TaskStatus)}`);
   };
 
-  const quickProjectId = projectFilter !== 'all' ? projectFilter : state.projects[0]?.id;
-
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader
-        title="Nhiệm vụ"
-        desc="Quản lý công việc theo bảng Kanban hoặc dạng bảng dữ liệu"
-        actions={(
-          <Button onClick={() => setFormOpen(true)}>
-            <Plus className="h-4 w-4" />Tạo nhiệm vụ
-          </Button>
-        )}
-      />
-
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -416,12 +411,11 @@ export function TasksPage() {
             aria-label="Tìm kiếm nhiệm vụ"
           />
         </div>
-        <Select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="w-56" aria-label="Lọc theo dự án">
-          <option value="all">Tất cả dự án</option>
-          {state.projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.code} · {p.name}</option>
-          ))}
-        </Select>
+        {canAdd && (
+          <Button onClick={() => setFormOpen(true)}>
+            <Plus className="h-4 w-4" />Tạo nhiệm vụ
+          </Button>
+        )}
         <Tabs
           value={view}
           onChange={setView}
@@ -438,12 +432,14 @@ export function TasksPage() {
           <EmptyState
             icon={<SquareKanban className="h-6 w-6" />}
             title="Chưa có nhiệm vụ"
-            desc="Tạo nhiệm vụ mới hoặc điều chỉnh bộ lọc tìm kiếm."
-            action={(
-              <Button onClick={() => setFormOpen(true)}>
-                <Plus className="h-4 w-4" />Tạo nhiệm vụ
-              </Button>
-            )}
+            desc="Tạo nhiệm vụ mới hoặc điều chỉnh từ khóa tìm kiếm."
+            action={
+              canAdd ? (
+                <Button onClick={() => setFormOpen(true)}>
+                  <Plus className="h-4 w-4" />Tạo nhiệm vụ
+                </Button>
+              ) : undefined
+            }
           />
         ) : (
           <DndContext onDragEnd={handleDragEnd}>
@@ -453,7 +449,7 @@ export function TasksPage() {
                   key={s.value}
                   status={s}
                   tasks={tasks.filter((t) => t.status === s.value)}
-                  quickProjectId={quickProjectId}
+                  quickProjectId={canAdd ? projectId : undefined}
                   onOpenTask={openTask}
                 />
               ))}
@@ -467,7 +463,7 @@ export function TasksPage() {
       <TaskForm
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        defaultProjectId={projectFilter !== 'all' ? projectFilter : undefined}
+        defaultProjectId={projectId}
       />
     </div>
   );
@@ -512,7 +508,9 @@ export function MyTasksPage() {
   const me = useCurrentUser();
 
   const groups = useMemo(() => {
-    const mine = state.tasks.filter((t) => t.assigneeIds.includes(me.id));
+    // Chỉ tính nhiệm vụ trong các dự án mình được thấy (đã tham gia; Admin thấy tất cả).
+    const visibleIds = new Set(visibleProjects(state.projects, me).map((p) => p.id));
+    const mine = state.tasks.filter((t) => t.assigneeIds.includes(me.id) && visibleIds.has(t.projectId));
     const g: Record<'overdue' | 'today' | 'upcoming' | 'done', Task[]> = { overdue: [], today: [], upcoming: [], done: [] };
     for (const t of mine) {
       if (t.status === 'done') g.done.push(t);
@@ -523,7 +521,7 @@ export function MyTasksPage() {
     const byDue = (a: Task, b: Task) => (a.dueDate ?? 'zzz').localeCompare(b.dueDate ?? 'zzz');
     (Object.keys(g) as (keyof typeof g)[]).forEach((k) => g[k].sort(byDue));
     return g;
-  }, [state.tasks, me.id]);
+  }, [state.tasks, state.projects, me]);
 
   const total = groups.overdue.length + groups.today.length + groups.upcoming.length + groups.done.length;
 

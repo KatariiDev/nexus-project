@@ -35,7 +35,8 @@ import {
   canManageMembers,
   canRequestProjects,
   canReviewProjectRequests,
-  canReviewTasks,
+  canReviewTaskForProject,
+  isProjectLeader,
 } from '../lib/roles';
 import type {
   ActivityLog,
@@ -85,6 +86,7 @@ export type Action =
   | { type: 'PROJECT_ADD'; project: Project }
   | { type: 'PROJECT_UPDATE'; project: Project }
   | { type: 'PROJECT_DELETE'; id: string }
+  | { type: 'PROJECT_JOIN_REQUEST'; projectId: string }
   | { type: 'PROJECT_REQUEST_CREATE'; request: ProjectRequest }
   | { type: 'PROJECT_REQUEST_REVIEW'; id: string; approve: boolean; note?: string }
   | { type: 'TASK_ADD'; task: Task }
@@ -104,7 +106,7 @@ export type Action =
   | { type: 'USER_UPDATE_ROLE'; id: string; role: WorkspaceRole }
   | { type: 'USER_UPDATE_PROFILE'; id: string; name: string; title: string }
   | { type: 'WORKSPACE_UPDATE'; name: string; timezone: string }
-  | { type: 'DOC_ADD'; title: string; content: string; projectId?: string }
+  | { type: 'DOC_ADD'; title: string; content: string; projectId?: string; fileUrl?: string; fileName?: string; fileSize?: number; fileType?: string }
   | { type: 'DOC_UPDATE'; id: string; title: string; content: string }
   | { type: 'DOC_DELETE'; id: string };
 
@@ -622,8 +624,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
 /**
  * Quy tắc duyệt nhiệm vụ: task đang ở trạng thái "Chờ duyệt" (in_review)
- * thì chỉ Owner/Admin mới được chuyển sang trạng thái khác
- * (duyệt → "Hoàn thành", hoặc trả về "Đang thực hiện"/"Cần thực hiện").
+ * thì chỉ Admin hoặc Leader của dự án chứa task đó mới được chuyển sang
+ * trạng thái khác (duyệt → "Hoàn thành", hoặc trả về "Đang thực hiện"/"Cần thực hiện").
  * Thành viên thường vẫn được đưa task vào "Chờ duyệt" (gửi yêu cầu duyệt).
  * Ném Error để dispatch hiện toast và giữ nguyên trạng thái.
  */
@@ -634,20 +636,22 @@ function assertApprovalPermission(state: AppState, action: Action): void {
   const prev = state.tasks.find((t) => t.id === taskId);
   if (!prev || prev.status !== 'in_review' || nextStatus === 'in_review') return;
   const me = state.users.find((u) => u.id === state.currentUserId);
-  if (!me || !canReviewTasks(me.role)) {
-    throw new Error('Nhiệm vụ đang chờ duyệt nghiệm thu — chỉ DUY NHẤT Admin mới được duyệt hoàn thành hoặc trả về.');
+  const project = state.projects.find((p) => p.id === prev.projectId);
+  const isLeader = project ? isProjectLeader(project, state.currentUserId) : false;
+  if (!me || !canReviewTaskForProject(me.role, me.isSuperAdmin ?? false, isLeader)) {
+    throw new Error('Nhiệm vụ đang chờ duyệt nghiệm thu — chỉ Admin hoặc Chủ dự án mới được duyệt hoàn thành hoặc trả về.');
   }
 }
 
 /**
  * Quy tắc quyền trong dự án:
  * Người dùng chỉ có quyền tạo task, sửa task, bình luận, checklist trong các dự án
- * mà mình là Member hoặc Leader (hoặc tài khoản là Admin toàn hệ thống).
- * Đối với các dự án khác, người dùng chỉ là Viewer (chỉ xem, không có quyền can thiệp).
+ * mà mình là Member hoặc Leader (hoặc tài khoản là Admin / Admin tổng).
+ * Đối với các dự án khác, người dùng không có quyền can thiệp.
  */
 function assertProjectMembership(state: AppState, action: Action): void {
   const me = state.users.find((u) => u.id === state.currentUserId);
-  if (!me || me.role === 'admin') return; // Admin có toàn quyền ở mọi dự án
+  if (!me || me.role === 'admin' || me.isSuperAdmin) return; // Admin có toàn quyền ở mọi dự án
 
   let targetProjectId: string | undefined;
 
@@ -679,59 +683,66 @@ function assertProjectMembership(state: AppState, action: Action): void {
   const isMember = proj.memberIds.includes(state.currentUserId);
 
   if (action.type === 'PROJECT_UPDATE' && !isLeader) {
-    throw new Error('Chỉ Admin hoặc Leader của dự án mới được chỉnh sửa dự án này.');
+    throw new Error('Chỉ Admin hoặc Chủ dự án mới được chỉnh sửa dự án này.');
   }
 
   if (!isLeader && !isMember) {
-    throw new Error('Bạn là Viewer của dự án này — chỉ được xem chứ không có quyền thao tác.');
+    throw new Error('Bạn không phải thành viên của dự án này nên không có quyền thao tác.');
   }
 }
 
 /**
- * Quy tắc phê duyệt dự án: thành viên gửi yêu cầu để Admin duyệt.
- * Người gửi yêu cầu khi được duyệt sẽ làm Leader của dự án đó.
+ * Quy tắc phê duyệt dự án: Leader gửi yêu cầu tạo dự án để Admin duyệt.
+ * Người gửi yêu cầu khi được duyệt sẽ làm Leader (Chủ dự án) của dự án đó.
  * Chỉ Admin được duyệt hoặc từ chối yêu cầu.
+ * Đổi trạng thái dự án (tạm dừng/lưu trữ/...) chỉ Leader của dự án đó + Admin
+ * làm trực tiếp — thành viên khác không gửi yêu cầu tạm dừng/xóa nữa.
  */
 function assertProjectPermission(state: AppState, action: Action): void {
   const me = state.users.find((u) => u.id === state.currentUserId);
-  const role = me?.role ?? 'viewer';
+  const role = me?.role ?? 'member';
   const isSuperAdmin = me?.isSuperAdmin ?? false;
 
   // Chỉ Admin (hoặc Admin tổng) được duyệt / từ chối yêu cầu.
   if (action.type === 'PROJECT_REQUEST_REVIEW' && !canReviewProjectRequests(role, isSuperAdmin)) {
     throw new Error('Chỉ Admin mới được duyệt yêu cầu.');
   }
-  // Thành viên được gửi yêu cầu tạo/tạm dừng/xóa dự án.
-  if (action.type === 'PROJECT_REQUEST_CREATE' && !canRequestProjects(role)) {
-    throw new Error('Bạn không có quyền gửi yêu cầu dự án.');
+  // Leader gửi yêu cầu tạo dự án; yêu cầu tạm dừng/xóa (nếu còn) phải là Leader của dự án đó.
+  if (action.type === 'PROJECT_REQUEST_CREATE') {
+    if (action.request.projectId) {
+      const proj = state.projects.find((p) => p.id === action.request.projectId);
+      const isLeader = proj ? isProjectLeader(proj, state.currentUserId) : false;
+      if (!isLeader && !canDirectProjectAction(role) && !isSuperAdmin) {
+        throw new Error('Chỉ Chủ dự án mới được gửi yêu cầu cho dự án này.');
+      }
+    } else if (!canRequestProjects(role)) {
+      throw new Error('Chỉ Leader mới được gửi yêu cầu tạo dự án (Admin nâng vai trò cho bạn trong trang Nhân sự).');
+    }
   }
   // Admin làm trực tiếp, không cần qua duyệt.
-  if (canDirectProjectAction(role)) return;
+  if (canDirectProjectAction(role) || isSuperAdmin) return;
 
   if (action.type === 'PROJECT_ADD') {
     throw new Error('Bạn cần gửi yêu cầu tạo dự án để Admin phê duyệt.');
   }
   if (action.type === 'PROJECT_DELETE') {
-    throw new Error('Bạn cần gửi yêu cầu xóa dự án để Admin phê duyệt.');
+    throw new Error('Chỉ Admin hoặc Chủ dự án mới được xóa dự án này.');
   }
   if (action.type === 'PROJECT_UPDATE') {
     const prev = state.projects.find((p) => p.id === action.project.id);
-    if (prev && prev.status !== 'paused' && action.project.status === 'paused') {
-      throw new Error('Bạn cần gửi yêu cầu tạm dừng dự án để Admin phê duyệt.');
+    if (prev && prev.status !== 'paused' && action.project.status === 'paused' && !isProjectLeader(prev, state.currentUserId)) {
+      throw new Error('Chỉ Admin hoặc Chủ dự án mới được tạm dừng dự án này.');
     }
   }
 }
 
-/**
- * Phân quyền quản lý thành viên: Owner chỉ được phân công
- * Manager/Member/Viewer; chỉ Admin được gán vai trò Owner/Admin.
- */
+/** Phân quyền quản lý thành viên: chỉ Admin được thêm thành viên / gán vai trò. */
 function assertMemberPermission(state: AppState, action: Action): void {
   if (action.type !== 'USER_UPDATE_ROLE' && action.type !== 'USER_ADD') return;
   const me = state.users.find((u) => u.id === state.currentUserId);
-  const role = me?.role ?? 'viewer';
+  const role = me?.role ?? 'member';
   if (!canManageMembers(role)) {
-    throw new Error('Chỉ Owner/Admin mới được quản lý thành viên.');
+    throw new Error('Chỉ Admin mới được quản lý thành viên.');
   }
   const targetRole = action.role;
   if (!assignableRoles(role).includes(targetRole)) {

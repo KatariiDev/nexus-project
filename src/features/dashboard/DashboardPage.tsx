@@ -35,6 +35,7 @@ import { dueLabel, greeting, isOverdue, timeAgo, todayLong } from '../../lib/for
 import { TASK_STATUSES } from '../../types';
 import type { TaskStatus } from '../../types';
 import { ProjectForm } from '../projects/ProjectForm';
+import { visibleProjects, canDirectProjectAction, canRequestProjects } from '../../lib/roles';
 import { cn } from '../../lib/utils';
 
 const PIE_COLORS: Record<TaskStatus, string> = {
@@ -69,53 +70,74 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const [formOpen, setFormOpen] = useState(false);
 
+  // Member chỉ thấy số liệu của các dự án đã tham gia (Admin thấy tất cả).
+  const visibleProjectsList = useMemo(() => visibleProjects(state.projects, user), [state.projects, user]);
+  const visibleIds = useMemo(() => new Set(visibleProjectsList.map((p) => p.id)), [visibleProjectsList]);
+  const visibleTasks = useMemo(
+    () => state.tasks.filter((t) => visibleIds.has(t.projectId)),
+    [state.tasks, visibleIds],
+  );
+  const canCreateProject = canDirectProjectAction(user.role) || canRequestProjects(user.role);
+
   const stats = useMemo(() => {
-    const activeProjects = state.projects.filter((p) => p.status === 'active').length;
-    const totalTasks = state.tasks.length;
-    const doneTasks = state.tasks.filter((t) => t.status === 'done').length;
-    const overdueTasks = state.tasks.filter((t) => isOverdue(t.dueDate, t.status)).length;
+    const activeProjects = visibleProjectsList.filter((p) => p.status === 'active').length;
+    const totalTasks = visibleTasks.length;
+    const doneTasks = visibleTasks.filter((t) => t.status === 'done').length;
+    const overdueTasks = visibleTasks.filter((t) => isOverdue(t.dueDate, t.status)).length;
     const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
     return { activeProjects, totalTasks, doneTasks, overdueTasks, completionRate };
-  }, [state.projects, state.tasks]);
+  }, [visibleProjectsList, visibleTasks]);
 
   const completedByDay = useMemo(() => {
     const days: { label: string; count: number }[] = [];
     for (let i = 13; i >= 0; i--) {
       const d = subDays(new Date(), i);
-      const count = state.tasks.filter((t) => t.completedAt && isSameDay(new Date(t.completedAt), d)).length;
+      const count = visibleTasks.filter((t) => t.completedAt && isSameDay(new Date(t.completedAt), d)).length;
       days.push({ label: format(d, 'dd/MM', { locale: vi }), count });
     }
     return days;
-  }, [state.tasks]);
+  }, [visibleTasks]);
 
   const statusDistribution = useMemo(
     () =>
       TASK_STATUSES.map((s) => ({
         name: s.label,
-        value: state.tasks.filter((t) => t.status === s.value).length,
+        value: visibleTasks.filter((t) => t.status === s.value).length,
         color: PIE_COLORS[s.value],
       })),
-    [state.tasks],
+    [visibleTasks],
   );
 
   const recentProjects = useMemo(
-    () => [...state.projects].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 4),
-    [state.projects],
+    () => [...visibleProjectsList].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 4),
+    [visibleProjectsList],
   );
 
   const upcomingTasks = useMemo(
     () =>
-      state.tasks
+      visibleTasks
         .filter((t) => t.status !== 'done' && t.dueDate)
         .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))
         .slice(0, 5),
-    [state.tasks],
+    [visibleTasks],
   );
 
-  const recentActivities = useMemo(
-    () => [...state.activityLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6),
-    [state.activityLogs],
-  );
+  const recentActivities = useMemo(() => {
+    // ActivityLog chỉ mang entityType/entityId: dự án thì lọc trực tiếp,
+    // nhiệm vụ thì tra projectId qua task, còn lại (thành viên/tài liệu...) giữ nguyên.
+    const taskProject = new Map(state.tasks.map((t) => [t.id, t.projectId]));
+    return [...state.activityLogs]
+      .filter((a) => {
+        if (a.entityType === 'project') return visibleIds.has(a.entityId);
+        if (a.entityType === 'task') {
+          const pid = taskProject.get(a.entityId);
+          return pid ? visibleIds.has(pid) : true;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 6);
+  }, [state.activityLogs, state.tasks, visibleIds]);
 
   const topWorkload = useMemo(
     () =>
@@ -143,9 +165,11 @@ export function DashboardPage() {
           <p className="mt-1 text-sm text-muted-foreground">{todayLong()}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => setFormOpen(true)}>
-            <Plus className="h-4 w-4" /> Tạo dự án
-          </Button>
+          {canCreateProject && (
+            <Button variant="outline" onClick={() => setFormOpen(true)}>
+              <Plus className="h-4 w-4" /> Tạo dự án
+            </Button>
+          )}
           <Button
             onClick={() => {
               setQuickCreateTab('task');
@@ -180,7 +204,7 @@ export function DashboardPage() {
             <CardDescription>Số nhiệm vụ hoàn thành trong 14 ngày qua</CardDescription>
           </CardHeader>
           <CardContent>
-            {state.tasks.length === 0 ? (
+            {visibleTasks.length === 0 ? (
               <EmptyState icon={<TrendingUp className="h-6 w-6" />} title="Chưa có dữ liệu" desc="Biểu đồ sẽ hiển thị khi có nhiệm vụ." />
             ) : (
               <ResponsiveContainer width="100%" height={260}>
@@ -249,7 +273,7 @@ export function DashboardPage() {
             {recentProjects.map((p) => {
               const progress = projectProgress(state.tasks, p.id);
               return (
-                <button key={p.id} onClick={() => navigate(`/projects/${p.id}`)} className="rounded-lg p-3 text-left transition-colors hover:bg-accent/50">
+                <button key={p.id} onClick={() => navigate(`/user/projects/${p.id}`)} className="rounded-lg p-3 text-left transition-colors hover:bg-accent/50">
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-2.5">
                       <span className="h-8 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />

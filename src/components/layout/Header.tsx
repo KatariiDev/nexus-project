@@ -14,11 +14,9 @@ const CRUMBS: Record<string, string> = {
   calendar: 'Lịch',
   timeline: 'Timeline',
   team: 'Nhóm & Nhân sự',
-  documents: 'Tài liệu',
   reports: 'Báo cáo & Phân tích',
   notifications: 'Thông báo',
   settings: 'Cài đặt',
-  tasks: 'Nhiệm vụ',
 };
 
 export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () => void; onOpenQuickCreate: () => void }) {

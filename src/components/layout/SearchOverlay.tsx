@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Briefcase, ListChecks, Users, FileText } from 'lucide-react';
-import { useApp } from '../../store/AppContext';
+import { useApp, useCurrentUser } from '../../store/AppContext';
 import { useUI } from './UIContext';
+import { visibleProjects } from '../../lib/roles';
 import { cn } from '../../lib/utils';
 
 export function SearchOverlay() {
   const { searchOpen, setSearchOpen, openTask } = useUI();
   const { state } = useApp();
+  const me = useCurrentUser();
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -35,17 +37,20 @@ export function SearchOverlay() {
     const query = q.trim().toLowerCase();
     if (!query) return null;
     const match = (s: string) => s.toLowerCase().includes(query);
+    // Member chỉ tìm được trong các dự án đã tham gia (Admin thấy tất cả).
+    const visible = visibleProjects(state.projects, me);
+    const visibleIds = new Set(visible.map((p) => p.id));
     return {
-      projects: state.projects.filter((p) => match(p.name) || match(p.code)).slice(0, 4),
-      tasks: state.tasks.filter((t) => match(t.title) || match(t.code)).slice(0, 6),
+      projects: visible.filter((p) => match(p.name) || match(p.code)).slice(0, 4),
+      tasks: state.tasks.filter((t) => visibleIds.has(t.projectId) && (match(t.title) || match(t.code))).slice(0, 6),
       users: state.users.filter((u) => match(u.name) || match(u.email)).slice(0, 4),
-      docs: state.documents.filter((x) => match(x.title)).slice(0, 4),
+      docs: state.documents.filter((x) => x.projectId && visibleIds.has(x.projectId) && match(x.title)).slice(0, 4),
     };
-  }, [q, state]);
+  }, [q, state, me]);
 
-  const go = (path: string) => {
+  const go = (path: string, navState?: { tab: string }) => {
     setSearchOpen(false);
-    navigate(path);
+    navigate(path, navState ? { state: navState } : undefined);
   };
 
   if (!searchOpen) return null;
@@ -92,7 +97,7 @@ export function SearchOverlay() {
               {results.projects.length > 0 && (
                 <Group icon={<Briefcase className="h-3.5 w-3.5" />} label="Dự án">
                   {results.projects.map((p) => (
-                    <Item key={p.id} title={p.name} sub={p.code} onClick={() => go(`/projects/${p.id}`)} />
+                    <Item key={p.id} title={p.name} sub={p.code} onClick={() => go(`/user/projects/${p.id}`)} />
                   ))}
                 </Group>
               )}
@@ -106,14 +111,18 @@ export function SearchOverlay() {
               {results.users.length > 0 && (
                 <Group icon={<Users className="h-3.5 w-3.5" />} label="Thành viên">
                   {results.users.map((u) => (
-                    <Item key={u.id} title={u.name} sub={u.email} onClick={() => go('/team')} />
+                    <Item key={u.id} title={u.name} sub={u.email} onClick={() => go('/user/team')} />
                   ))}
                 </Group>
               )}
               {results.docs.length > 0 && (
                 <Group icon={<FileText className="h-3.5 w-3.5" />} label="Tài liệu">
                   {results.docs.map((x) => (
-                    <Item key={x.id} title={x.title} onClick={() => go('/documents')} />
+                    <Item
+                      key={x.id}
+                      title={x.title}
+                      onClick={() => go(`/user/projects/${x.projectId}`, { tab: 'documents' })}
+                    />
                   ))}
                 </Group>
               )}

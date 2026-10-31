@@ -121,7 +121,8 @@ export function AdminOverviewPage() {
     { label: 'Yêu cầu chờ duyệt', value: pending.length, tone: 'warning' as const, to: '/admin/approvals' },
     { label: 'Thành viên', value: state.users.length, tone: 'info' as const, to: '/admin/users' },
     { label: 'Dự án', value: state.projects.length, tone: 'primary' as const, to: '/admin/projects' },
-    { label: 'Nhiệm vụ quá hạn', value: overdue.length, tone: 'destructive' as const, to: '/user/tasks' },
+    // Không còn trang Nhiệm vụ riêng — card này chỉ hiển thị số, không điều hướng.
+    { label: 'Nhiệm vụ quá hạn', value: overdue.length, tone: 'destructive' as const, to: undefined },
   ];
 
   return (
@@ -129,7 +130,11 @@ export function AdminOverviewPage() {
       <PageHeader title="Tổng quan quản trị" desc="Tình hình workspace trong một cái nhìn" />
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         {cards.map((c) => (
-          <Card key={c.label} className="cursor-pointer transition-shadow hover:shadow-lift" onClick={() => navigate(c.to)}>
+          <Card
+            key={c.label}
+            className={c.to ? 'cursor-pointer transition-shadow hover:shadow-lift' : undefined}
+            onClick={c.to ? () => navigate(c.to as string) : undefined}
+          >
             <CardContent className="p-5">
               <p className="text-3xl font-bold">{c.value}</p>
               <p className="mt-1 text-sm text-muted-foreground">{c.label}</p>

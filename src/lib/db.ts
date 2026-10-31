@@ -25,6 +25,7 @@ import type {
   WorkspaceRole,
 } from '../types';
 import type { Action, AppState } from '../store/AppContext';
+import { getSupabase } from './supabase';
 import { newId } from './utils';
 
 type Sb = SupabaseClient;
@@ -109,12 +110,23 @@ function mapUser(p: DbProfile, role: string): User {
     name: p.name,
     email: p.email,
     title: p.title ?? '',
-    role: role as WorkspaceRole,
+    role: normalizeRole(role),
     status: 'active',
     avatarUrl: p.avatar_url ?? undefined,
     username: mappedUsername,
     isSuperAdmin: Boolean((p as unknown as { is_super_admin?: boolean }).is_super_admin),
   };
+}
+
+/**
+ * Chuẩn hóa vai trò từ DB về 3 vai trò Admin / Leader / Member.
+ * DB hiện tại vẫn có thể chứa giá trị cũ ('owner'/'manager'/'viewer') vì
+ * CHECK constraint chưa được migrate — các giá trị cũ đều về 'member'
+ * (fail closed: không tự nâng quyền cho ai) cho tới khi user migrate DB.
+ */
+export function normalizeRole(role: string): WorkspaceRole {
+  if (role === 'admin' || role === 'leader' || role === 'member') return role;
+  return 'member';
 }
 
 function mapProject(r: DbProject, memberIds: string[]): Project {
@@ -175,7 +187,7 @@ export async function fetchMyMemberships(sb: Sb, userId: string): Promise<Member
   if (error) throw error;
   return ((data ?? []) as unknown as DbWorkspaceMember[]).map((m) => ({
     workspaceId: m.workspace_id,
-    role: m.role as WorkspaceRole,
+    role: normalizeRole(m.role),
   }));
 }
 
@@ -296,7 +308,7 @@ export async function loadWorkspaceData(
     .map((m) => mapUser(m.profiles, m.role));
 
   // Admin tổng: gộp trùng user (một người có thể ở nhiều workspace), giữ role cao nhất.
-  const ROLE_RANK: Record<string, number> = { viewer: 0, member: 1, manager: 2, owner: 3, admin: 4 };
+  const ROLE_RANK: Record<string, number> = { member: 0, leader: 1, admin: 2 };
   const deduped = new Map<string, User>();
   for (const u of users) {
     const prev = deduped.get(u.id);
@@ -354,10 +366,12 @@ export async function loadWorkspaceData(
         entityType: l.entity_type as ActivityLog['entityType'], entityId: l.entity_id,
         entityName: l.entity_name ?? '', createdAt: l.created_at,
       })),
-    documents: ((docsRes.data ?? []) as { id: string; project_id: string | null; title: string; content: string | null; author_id: string; created_at: string; updated_at: string }[])
+    documents: ((docsRes.data ?? []) as { id: string; project_id: string | null; title: string; content: string | null; author_id: string; created_at: string; updated_at: string; file_url?: string | null; file_name?: string | null; file_size?: number | null; file_type?: string | null }[])
       .map((d) => ({
         id: d.id, projectId: d.project_id ?? undefined, title: d.title, content: d.content ?? '',
         authorId: d.author_id, createdAt: d.created_at, updatedAt: d.updated_at,
+        fileUrl: d.file_url ?? undefined, fileName: d.file_name ?? undefined,
+        fileSize: d.file_size ?? undefined, fileType: d.file_type ?? undefined,
       })),
     projectRequests: ((requestsRes.data ?? []) as {
       id: string; workspace_id: string; type: string; project_id: string | null;
@@ -385,6 +399,68 @@ function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/* ================= Tài liệu dự án: upload file (bucket project-documents) ================= */
+
+/** Bucket private chứa tệp tài liệu của dự án (tạo bằng nexus-part1-db.sql). */
+export const PROJECT_DOCS_BUCKET = 'project-documents';
+
+/** Loại tệp cho phép kéo-thả vào tab Tài liệu của dự án. */
+export const PROJECT_DOC_ACCEPT = [
+  'image/*',
+  'video/*',
+  'application/pdf',
+  '.doc', '.docx',
+  '.xls', '.xlsx',
+] as const;
+
+/** Dung lượng tối đa cho một tệp tài liệu (20 MB). */
+export const PROJECT_DOC_MAX_BYTES = 20 * 1024 * 1024;
+
+function sanitizeFileName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 120) || 'file';
+}
+
+export interface UploadedProjectDoc {
+  /** Đường dẫn trong bucket — lưu vào documents.file_url. */
+  path: string;
+  name: string;
+  size: number;
+  type: string;
+}
+
+/**
+ * Upload một tệp lên bucket `project-documents` theo quy ước
+ * `<workspace_id>/<project_id>/<doc_id>-<tên-file>`.
+ * Cần chạy nexus-part1-db.sql (tạo bucket + policy) trước khi dùng.
+ */
+export async function uploadProjectDocumentFile(
+  workspaceId: string,
+  projectId: string,
+  file: File,
+): Promise<UploadedProjectDoc> {
+  const docId = newId();
+  const path = `${workspaceId}/${projectId}/${docId}-${sanitizeFileName(file.name)}`;
+  const { error } = await getSupabase().storage
+    .from(PROJECT_DOCS_BUCKET)
+    .upload(path, file, { contentType: file.type || undefined, upsert: false });
+  if (error) throw new Error(error.message || 'Không tải lên được tệp.');
+  return { path, name: file.name, size: file.size, type: file.type };
+}
+
+/** Lấy link tải (signed URL, hiệu lực 1 giờ) cho một tệp tài liệu. */
+export async function getProjectDocumentUrl(filePath: string): Promise<string> {
+  const { data, error } = await getSupabase().storage
+    .from(PROJECT_DOCS_BUCKET)
+    .createSignedUrl(filePath, 3600);
+  if (error || !data?.signedUrl) throw new Error(error?.message || 'Không lấy được link tải.');
+  return data.signedUrl;
 }
 
 /* ================= Ghi thao tác xuống Supabase ================= */
@@ -521,19 +597,23 @@ async function notifyAssignees(
 
 /**
  * Thông báo quy trình duyệt nhiệm vụ:
- * - requested: có người gửi yêu cầu duyệt (→ in_review) → báo cho Owner/Admin.
- * - approved: admin duyệt (in_review → done) → báo cho người thực hiện.
- * - rejected: admin trả về (in_review → trạng thái khác) → báo cho người thực hiện.
+ * - requested: có người gửi yêu cầu duyệt (→ in_review) → báo cho Admin + Leader của dự án.
+ * - approved: duyệt (in_review → done) → báo cho người thực hiện.
+ * - rejected: trả về (in_review → trạng thái khác) → báo cho người thực hiện.
  */
 async function notifyReview(
   sb: Sb,
   ctx: PersistContext,
   task: Task,
   event: 'requested' | 'approved' | 'rejected',
+  leaderId?: string,
 ): Promise<void> {
   const targets =
     event === 'requested'
-      ? (await freshRoleUserIds(sb, ctx.workspaceId, ['admin'])).filter((id) => id !== ctx.userId)
+      ? [...new Set([
+          ...(await freshRoleUserIds(sb, ctx.workspaceId, ['admin'])),
+          ...(leaderId ? [leaderId] : []),
+        ])].filter((id) => id !== ctx.userId)
       : task.assigneeIds.filter((id) => id !== ctx.userId);
   if (targets.length === 0) return;
   const meta = {
@@ -793,8 +873,9 @@ export async function persistAction(
       }
       if (statusChanged) {
         const wasReview = prev?.status === 'in_review';
+        const leaderId = state.projects.find((p) => p.id === task.projectId)?.managerId;
         if (!wasReview && task.status === 'in_review') {
-          await notifyReview(sb, ctx, task, 'requested');
+          await notifyReview(sb, ctx, task, 'requested', leaderId);
         } else if (wasReview && task.status === 'done') {
           await notifyReview(sb, ctx, task, 'approved');
         } else if (wasReview) {
@@ -814,7 +895,8 @@ export async function persistAction(
       const log = buildLog(ctx, 'đã chuyển trạng thái', 'task', task.id, task.title);
       await insertLog(sb, ctx, log);
       if (!wasReview && action.status === 'in_review') {
-        await notifyReview(sb, ctx, task, 'requested');
+        const leaderId = state.projects.find((p) => p.id === task.projectId)?.managerId;
+        await notifyReview(sb, ctx, task, 'requested', leaderId);
       } else if (wasReview && action.status === 'done') {
         await notifyReview(sb, ctx, task, 'approved');
       } else if (wasReview) {
@@ -955,15 +1037,28 @@ export async function persistAction(
         authorId: ctx.userId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        fileUrl: action.fileUrl,
+        fileName: action.fileName,
+        fileSize: action.fileSize,
+        fileType: action.fileType,
       };
-      const { error } = await sb.from('documents').insert({
+      const row: Record<string, unknown> = {
         id: doc.id,
         workspace_id: ctx.workspaceId,
         project_id: doc.projectId ?? null,
         title: doc.title,
         content: doc.content,
         author_id: doc.authorId,
-      });
+      };
+      // Chỉ gửi kèm các cột file khi có tệp đính kèm — tài liệu chữ vẫn tạo được
+      // ngay cả khi user chưa chạy SQL thêm cột file_* (nexus-part1-db.sql).
+      if (doc.fileUrl) {
+        row.file_url = doc.fileUrl;
+        row.file_name = doc.fileName ?? null;
+        row.file_size = doc.fileSize ?? null;
+        row.file_type = doc.fileType ?? null;
+      }
+      const { error } = await sb.from('documents').insert(row);
       if (error) throwDb(error, 'Không tạo được tài liệu.');
       return { ...action, doc };
     }
@@ -977,8 +1072,30 @@ export async function persistAction(
     }
 
     case 'DOC_DELETE': {
+      const doc = state.documents.find((d) => d.id === action.id);
       const { error } = await sb.from('documents').delete().eq('id', action.id);
       if (error) throwDb(error, 'Không xóa được tài liệu.');
+      // Xóa luôn file trong Storage nếu tài liệu có tệp đính kèm (lỗi thì bỏ qua).
+      if (doc?.fileUrl) {
+        await sb.storage.from(PROJECT_DOCS_BUCKET).remove([doc.fileUrl]).catch(() => undefined);
+      }
+      return action;
+    }
+
+    case 'PROJECT_JOIN_REQUEST': {
+      const project = state.projects.find((p) => p.id === action.projectId);
+      if (!project) throwDb(new Error('not found'), 'Không tìm thấy dự án.');
+      if (project.managerId === ctx.userId) throw new Error('Bạn đã là Chủ dự án này.');
+      if (project.memberIds.includes(ctx.userId)) throw new Error('Bạn đã là thành viên của dự án này.');
+      const { error } = await sb.from('notifications').insert({
+        id: newId(),
+        user_id: project.managerId,
+        kind: 'project',
+        title: 'Có người xin tham gia dự án',
+        body: `${ctx.userName} xin tham gia dự án "${project.name}". Mở chi tiết dự án để thêm họ vào nhóm.`,
+        link: `/user/projects/${project.id}`,
+      });
+      if (error) throwDb(error, 'Không gửi được yêu cầu tham gia.');
       return action;
     }
 

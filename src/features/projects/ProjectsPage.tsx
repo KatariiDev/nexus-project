@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Archive,
   ArchiveRestore,
@@ -9,6 +9,7 @@ import {
   FolderOpen,
   LayoutGrid,
   List,
+  Mail,
   MoreVertical,
   Pause,
   Pencil,
@@ -16,25 +17,37 @@ import {
   Plus,
   Search,
   Trash2,
+  UserPlus,
   Users,
 } from 'lucide-react';
 import { projectProgress, projectTasks, useApp, useCurrentUser, userById } from '../../store/AppContext';
-import { canDirectProjectAction, canRequestProjects } from '../../lib/roles';
-import { useUI } from '../../components/layout/UIContext';
+import {
+  canAccessAdmin,
+  canChangeProjectStatus,
+  canDirectProjectAction,
+  canInviteToProject,
+  canRequestProjects,
+  isProjectLeader,
+  isProjectMember,
+} from '../../lib/roles';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
-import { Badge, PriorityBadge, ProjectStatusBadge, TaskStatusBadge } from '../../components/ui/badge';
-import { Input, Select } from '../../components/ui/input';
+import { Badge, PriorityBadge, ProjectStatusBadge } from '../../components/ui/badge';
+import { Field, Input, Select } from '../../components/ui/input';
 import { Avatar, AvatarStack } from '../../components/ui/avatar';
 import { Progress } from '../../components/ui/progress';
 import { Tabs } from '../../components/ui/tabs';
 import { ConfirmDialog, EmptyState, PageHeader } from '../../components/ui/feedback';
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../components/ui/dialog';
 import { Dropdown, DropdownItem, DropdownSeparator } from '../../components/ui/dropdown';
 import { toast } from '../../components/ui/toast';
 import { dueLabel, fmtDate, isOverdue, timeAgo } from '../../lib/format';
+import { getSupabase } from '../../lib/supabase';
 import { PRIORITIES, PROJECT_STATUSES } from '../../types';
 import type { Priority, Project, ProjectStatus, User } from '../../types';
 import { ProjectForm } from './ProjectForm';
+import { ProjectTaskBoard } from '../tasks/TasksPage';
+import { ProjectDocuments } from '../documents/DocumentsPage';
 import { cn, newId } from '../../lib/utils';
 
 const PAGE_SIZE = 9;
@@ -52,6 +65,8 @@ function fmtVND(n?: number): string {
   return `${new Intl.NumberFormat('vi-VN').format(n)} ₫`;
 }
 
+type ScopeFilter = 'all' | 'mine' | 'not-joined';
+
 /* ================= ProjectsPage ================= */
 
 type SortKey = 'newest' | 'deadline' | 'progress';
@@ -62,16 +77,19 @@ export function ProjectsPage() {
   const canDirect = canDirectProjectAction(me.role);
   const canRequest = canRequestProjects(me.role);
   const canCreate = canDirect || canRequest;
+  const isAdmin = canAccessAdmin(me.role, me.isSuperAdmin);
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | ProjectStatus>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [managerFilter, setManagerFilter] = useState('all');
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>(() => (isAdmin ? 'all' : 'mine'));
   const [sort, setSort] = useState<SortKey>('newest');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [page, setPage] = useState(1);
   const [formState, setFormState] = useState<{ open: boolean; initial?: Project }>({ open: false });
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [joinRequested, setJoinRequested] = useState<string[]>([]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -81,6 +99,9 @@ export function ProjectsPage() {
       if (statusFilter === 'all' ? p.status === 'archived' : p.status !== statusFilter) return false;
       if (priorityFilter !== 'all' && p.priority !== priorityFilter) return false;
       if (managerFilter !== 'all' && p.managerId !== managerFilter) return false;
+      const joined = isProjectMember(p, me.id);
+      if (scopeFilter === 'mine' && !joined) return false;
+      if (scopeFilter === 'not-joined' && joined) return false;
       return true;
     });
     const progressOf = (p: Project) => projectProgress(state.tasks, p.id);
@@ -95,7 +116,7 @@ export function ProjectsPage() {
         list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     return list;
-  }, [state.projects, state.tasks, query, statusFilter, priorityFilter, managerFilter, sort]);
+  }, [state.projects, state.tasks, query, statusFilter, priorityFilter, managerFilter, scopeFilter, sort, me.id]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -106,14 +127,32 @@ export function ProjectsPage() {
   const openCreate = () => setFormState({ open: true });
   const openEdit = (project: Project) => setFormState({ open: true, initial: project });
 
+  /** Quyền thao tác trên một dự án (theo từng dự án, không theo vai trò workspace). */
+  const permsFor = (p: Project) => {
+    const leader = isProjectLeader(p, me.id);
+    return {
+      canEdit: isAdmin || leader,
+      // Admin xóa trực tiếp; Leader gửi yêu cầu xóa để Admin duyệt.
+      deleteMode: (isAdmin ? 'direct' : leader ? 'request' : 'none') as 'direct' | 'request' | 'none',
+      canJoin: !isAdmin && !isProjectMember(p, me.id),
+    };
+  };
+
+  const requestJoin = (p: Project) => {
+    void dispatch({ type: 'PROJECT_JOIN_REQUEST', projectId: p.id }).then(() => {
+      setJoinRequested((s) => (s.includes(p.id) ? s : [...s, p.id]));
+      toast('Đã gửi yêu cầu tham gia', `Chủ dự án "${p.name}" sẽ duyệt yêu cầu của bạn.`);
+    });
+  };
+
   const handleDelete = () => {
     if (!deleteId) return;
     const target = state.projects.find((p) => p.id === deleteId);
-    if (canDirect) {
+    if (isAdmin) {
       dispatch({ type: 'PROJECT_DELETE', id: deleteId });
       toast('Đã xóa dự án', target?.name, 'success');
     } else {
-      // Owner: gửi yêu cầu để Admin phê duyệt.
+      // Chủ dự án: gửi yêu cầu để Admin phê duyệt.
       dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
@@ -171,6 +210,19 @@ export function ProjectsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <Select
                 className="w-auto"
+                value={scopeFilter}
+                onChange={(e) => {
+                  setScopeFilter(e.target.value as ScopeFilter);
+                  resetPage();
+                }}
+                aria-label="Phạm vi dự án"
+              >
+                <option value="all">Tất cả dự án</option>
+                <option value="mine">Dự án của tôi</option>
+                <option value="not-joined">Chưa tham gia</option>
+              </Select>
+              <Select
+                className="w-auto"
                 value={statusFilter}
                 onChange={(e) => {
                   setStatusFilter(e.target.value as 'all' | ProjectStatus);
@@ -207,7 +259,7 @@ export function ProjectsPage() {
                   resetPage();
                 }}
               >
-                <option value="all">Mọi quản lý</option>
+                <option value="all">Mọi Chủ dự án</option>
                 {state.users.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
@@ -245,7 +297,13 @@ export function ProjectsPage() {
         <EmptyState
           icon={<FolderOpen className="h-6 w-6" />}
           title="Không tìm thấy dự án"
-          desc="Thử thay đổi bộ lọc hoặc tạo một dự án mới."
+          desc={
+            scopeFilter === 'not-joined'
+              ? 'Bạn đã tham gia tất cả dự án trong workspace.'
+              : scopeFilter === 'mine'
+                ? 'Bạn chưa tham gia dự án nào. Chuyển sang mục "Chưa tham gia" để xin tham gia.'
+                : 'Thử thay đổi bộ lọc hoặc tạo một dự án mới.'
+          }
           action={
             canCreate ? (
               <Button onClick={openCreate}>
@@ -256,9 +314,23 @@ export function ProjectsPage() {
         />
       ) : view === 'grid' ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {pageItems.map((p) => (
-            <ProjectCard key={p.id} project={p} onEdit={openEdit} onToggleArchive={toggleArchive} onDelete={(id) => setDeleteId(id)} canDelete={canCreate} />
-          ))}
+          {pageItems.map((p) => {
+            const perms = permsFor(p);
+            return (
+              <ProjectCard
+                key={p.id}
+                project={p}
+                onEdit={openEdit}
+                onToggleArchive={toggleArchive}
+                onDelete={(id) => setDeleteId(id)}
+                canEdit={perms.canEdit}
+                deleteMode={perms.deleteMode}
+                canJoin={perms.canJoin}
+                joinRequested={joinRequested.includes(p.id)}
+                onJoin={() => requestJoin(p)}
+              />
+            );
+          })}
         </div>
       ) : (
         <Card>
@@ -271,7 +343,7 @@ export function ProjectsPage() {
                   <th className="px-4 py-3 font-medium">Trạng thái</th>
                   <th className="px-4 py-3 font-medium">Ưu tiên</th>
                   <th className="px-4 py-3 font-medium">Tiến độ</th>
-                  <th className="px-4 py-3 font-medium">Quản lý</th>
+                  <th className="px-4 py-3 font-medium">Chủ dự án</th>
                   <th className="px-4 py-3 font-medium">Hạn</th>
                   <th className="px-4 py-3 text-right font-medium">Thao tác</th>
                 </tr>
@@ -281,6 +353,8 @@ export function ProjectsPage() {
                   const progress = projectProgress(state.tasks, p.id);
                   const manager = userById(state.users, p.managerId);
                   const due = dueLabel(p.endDate, p.status === 'completed' ? 'done' : undefined);
+                  const perms = permsFor(p);
+                  const joined = joinRequested.includes(p.id);
                   return (
                     <tr key={p.id} onClick={() => navigate(`/user/projects/${p.id}`)} className="cursor-pointer border-b last:border-0 hover:bg-accent/50">
                       <td className="px-4 py-3">
@@ -307,22 +381,37 @@ export function ProjectsPage() {
                       <td className="px-4 py-3">{manager?.name ?? '—'}</td>
                       <td className={cn('whitespace-nowrap px-4 py-3', DUE_TONE_CLASS[due.tone])}>{due.text}</td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="icon" aria-label="Chỉnh sửa" onClick={() => openEdit(p)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={p.status === 'archived' ? 'Kích hoạt' : 'Lưu trữ'}
-                            onClick={() => toggleArchive(p)}
-                          >
-                            {p.status === 'archived' ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
-                          </Button>
-                          <Button variant="ghost" size="icon" aria-label="Xóa" onClick={() => setDeleteId(p.id)} className="hover:text-destructive">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        {perms.canJoin ? (
+                          <div className="flex items-center justify-end">
+                            <Button size="sm" disabled={joined} onClick={() => requestJoin(p)}>
+                              <UserPlus className="h-4 w-4" />
+                              {joined ? 'Đã gửi yêu cầu' : 'Xin tham gia'}
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1">
+                            {perms.canEdit && (
+                              <>
+                                <Button variant="ghost" size="icon" aria-label="Chỉnh sửa" onClick={() => openEdit(p)}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label={p.status === 'archived' ? 'Kích hoạt' : 'Lưu trữ'}
+                                  onClick={() => toggleArchive(p)}
+                                >
+                                  {p.status === 'archived' ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                                </Button>
+                              </>
+                            )}
+                            {perms.deleteMode !== 'none' && (
+                              <Button variant="ghost" size="icon" aria-label="Xóa" onClick={() => setDeleteId(p.id)} className="hover:text-destructive">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -356,9 +445,9 @@ export function ProjectsPage() {
       <ProjectForm open={formState.open} initial={formState.initial} onClose={() => setFormState({ open: false })} />
       <ConfirmDialog
         open={deleteId !== null}
-        title={canDirect ? 'Xóa dự án?' : 'Gửi yêu cầu xóa dự án?'}
-        desc={canDirect ? 'Dự án sẽ bị xóa khỏi workspace. Hành động này không thể hoàn tác.' : 'Yêu cầu của bạn sẽ được gửi đến Admin để phê duyệt.'}
-        confirmLabel={canDirect ? 'Xóa dự án' : 'Gửi yêu cầu'}
+        title={isAdmin ? 'Xóa dự án?' : 'Gửi yêu cầu xóa dự án?'}
+        desc={isAdmin ? 'Dự án sẽ bị xóa khỏi workspace. Hành động này không thể hoàn tác.' : 'Yêu cầu của bạn sẽ được gửi đến Admin để phê duyệt.'}
+        confirmLabel={isAdmin ? 'Xóa dự án' : 'Gửi yêu cầu'}
         onCancel={() => setDeleteId(null)}
         onConfirm={handleDelete}
       />
@@ -373,13 +462,21 @@ function ProjectCard({
   onEdit,
   onToggleArchive,
   onDelete,
-  canDelete,
+  canEdit,
+  deleteMode,
+  canJoin,
+  joinRequested,
+  onJoin,
 }: {
   project: Project;
   onEdit: (p: Project) => void;
   onToggleArchive: (p: Project) => void;
   onDelete: (id: string) => void;
-  canDelete: boolean;
+  canEdit: boolean;
+  deleteMode: 'direct' | 'request' | 'none';
+  canJoin: boolean;
+  joinRequested: boolean;
+  onJoin: () => void;
 }) {
   const { state } = useApp();
   const navigate = useNavigate();
@@ -407,30 +504,36 @@ function ProjectCard({
               <PriorityBadge priority={project.priority} showDot />
             </div>
           </div>
-          <div onClick={(e) => e.stopPropagation()}>
-            <Dropdown
-              align="right"
-              trigger={
-                <Button variant="ghost" size="icon" aria-label="Tùy chọn dự án">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              }
-            >
-              <DropdownItem icon={<Pencil className="h-4 w-4" />} label="Chỉnh sửa" onClick={() => onEdit(project)} />
-              <DropdownItem
-                icon={archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
-                label={archived ? 'Kích hoạt' : 'Lưu trữ'}
-                desc={archived ? 'Đưa dự án hoạt động trở lại' : 'Tạm ẩn khỏi danh sách chính'}
-                onClick={() => onToggleArchive(project)}
-              />
-              {canDelete && (
-                <>
-                  <DropdownSeparator />
-                  <DropdownItem icon={<Trash2 className="h-4 w-4" />} label="Xóa dự án" danger onClick={() => onDelete(project.id)} />
-                </>
-              )}
-            </Dropdown>
-          </div>
+          {(canEdit || deleteMode !== 'none') && (
+            <div onClick={(e) => e.stopPropagation()}>
+              <Dropdown
+                align="right"
+                trigger={
+                  <Button variant="ghost" size="icon" aria-label="Tùy chọn dự án">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                }
+              >
+                {canEdit && (
+                  <>
+                    <DropdownItem icon={<Pencil className="h-4 w-4" />} label="Chỉnh sửa" onClick={() => onEdit(project)} />
+                    <DropdownItem
+                      icon={archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                      label={archived ? 'Kích hoạt' : 'Lưu trữ'}
+                      desc={archived ? 'Đưa dự án hoạt động trở lại' : 'Tạm ẩn khỏi danh sách chính'}
+                      onClick={() => onToggleArchive(project)}
+                    />
+                  </>
+                )}
+                {deleteMode !== 'none' && (
+                  <>
+                    <DropdownSeparator />
+                    <DropdownItem icon={<Trash2 className="h-4 w-4" />} label={deleteMode === 'direct' ? 'Xóa dự án' : 'Yêu cầu xóa dự án'} danger onClick={() => onDelete(project.id)} />
+                  </>
+                )}
+              </Dropdown>
+            </div>
+          )}
         </div>
 
         <div>
@@ -452,30 +555,203 @@ function ProjectCard({
         <div className="flex items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
           <Users className="h-3.5 w-3.5" />
           <span className="truncate">
-            Quản lý: <span className="font-medium text-foreground">{manager?.name ?? '—'}</span>
+            Chủ dự án: <span className="font-medium text-foreground">{manager?.name ?? '—'}</span>
           </span>
         </div>
+
+        {canJoin && (
+          <div onClick={(e) => e.stopPropagation()} className="pt-1">
+            <Button size="sm" className="w-full" disabled={joinRequested} onClick={onJoin}>
+              <UserPlus className="h-4 w-4" />
+              {joinRequested ? 'Đã gửi yêu cầu tham gia' : 'Xin tham gia'}
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
+/* ---------------- InviteMembersDialog ---------------- */
+
+/** Mời thành viên vào dự án: thêm người đã có trong workspace, hoặc mời bằng email (chỉ Admin). */
+function InviteMembersDialog({ project, open, onClose }: { project: Project; open: boolean; onClose: () => void }) {
+  const { state, dispatch } = useApp();
+  const me = useCurrentUser();
+  const isAdmin = canAccessAdmin(me.role, me.isSuperAdmin);
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setQuery('');
+      setSelected([]);
+      setEmail('');
+    }
+  }, [open ]);
+
+  const candidates = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return state.users.filter((u) => {
+      if (project.memberIds.includes(u.id) || u.id === project.managerId) return false;
+      if (!q) return true;
+      return `${u.name} ${u.email} ${u.title || ''}`.toLowerCase().includes(q);
+    });
+  }, [state.users, project, query]);
+
+  const toggle = (id: string) =>
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  const addSelected = () => {
+    if (selected.length === 0) return;
+    setBusy(true);
+    void dispatch({
+      type: 'PROJECT_UPDATE',
+      project: { ...project, memberIds: Array.from(new Set([...project.memberIds, ...selected])) },
+    }).then(() => {
+      toast('Đã thêm thành viên', `${selected.length} người đã tham gia dự án "${project.name}".`);
+      setSelected([]);
+      setBusy(false);
+      onClose();
+    });
+  };
+
+  const inviteByEmail = async () => {
+    const clean = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(clean)) {
+      toast('Email không hợp lệ', 'Vui lòng nhập đúng định dạng email.', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const sb = getSupabase();
+      const { data: profile } = await sb.from('profiles').select('id').ilike('email', clean).maybeSingle();
+      const profileId = (profile as { id: string } | null)?.id;
+      if (!profileId) {
+        toast('Không tìm thấy tài khoản', `Email ${clean} chưa đăng ký tài khoản Nexus. Người này cần đăng ký trước.`, 'error');
+        return;
+      }
+      if (profileId === me.id) {
+        toast('Không thể mời chính mình', 'Bạn đã ở trong dự án này rồi.', 'error');
+        return;
+      }
+      if (!state.users.some((u) => u.id === profileId)) {
+        await dispatch({ type: 'USER_ADD', email: clean, role: 'member' });
+        const { data: wm } = await sb
+          .from('workspace_members')
+          .select('user_id')
+          .eq('workspace_id', state.workspace.id)
+          .eq('user_id', profileId)
+          .maybeSingle();
+        if (!wm) {
+          toast('Không thêm được vào workspace', 'Vui lòng thử lại.', 'error');
+          return;
+        }
+      }
+      await dispatch({
+        type: 'PROJECT_UPDATE',
+        project: { ...project, memberIds: Array.from(new Set([...project.memberIds, profileId])) },
+      });
+      toast('Đã mời thành viên', `${clean} đã tham gia dự án "${project.name}".`);
+      setEmail('');
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} wide>
+      <DialogHeader title="Mời thành viên" desc={`Thêm thành viên vào dự án "${project.name}".`} onClose={onClose} />
+      <DialogBody className="flex flex-col gap-4">
+        <Field label="Tìm thành viên trong workspace">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Tìm theo tên, email, chức danh..."
+            />
+          </div>
+        </Field>
+        <div className="max-h-56 overflow-y-auto rounded-md border border-input p-2">
+          {candidates.length === 0 && (
+            <p className="px-2 py-3 text-sm text-muted-foreground">
+              {query ? 'Không tìm thấy thành viên nào.' : 'Mọi thành viên trong workspace đều đã ở trong dự án.'}
+            </p>
+          )}
+          {candidates.map((u) => (
+            <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
+              <input
+                type="checkbox"
+                checked={selected.includes(u.id)}
+                onChange={() => toggle(u.id)}
+                className="h-4 w-4 accent-primary"
+              />
+              <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
+              <span className="text-sm">
+                <span className="font-medium">{u.name}</span>
+                <span className="text-muted-foreground"> · {u.email}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {isAdmin && (
+          <Field label="Hoặc mời người mới bằng email">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="email@congty.vn"
+                  type="email"
+                />
+              </div>
+              <Button variant="outline" disabled={busy} onClick={() => void inviteByEmail()}>
+                Mời qua email
+              </Button>
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">Người này phải đã đăng ký tài khoản Nexus trước; họ sẽ được thêm vào workspace rồi vào dự án.</p>
+          </Field>
+        )}
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Hủy
+        </Button>
+        <Button disabled={selected.length === 0 || busy} onClick={addSelected}>
+          <UserPlus className="h-4 w-4" />
+          Thêm {selected.length > 0 ? `${selected.length} thành viên` : 'vào dự án'}
+        </Button>
+      </DialogFooter>
+    </Dialog>
+  );
+}
+
 /* ================= ProjectDetailPage ================= */
 
-type DetailTab = 'overview' | 'tasks' | 'activity';
+type DetailTab = 'overview' | 'tasks' | 'documents' | 'activity';
 
 export function ProjectDetailPage() {
   const { id } = useParams();
+  const location = useLocation();
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
-  const canDirect = canDirectProjectAction(me.role);
-  const canRequest = canRequestProjects(me.role);
-  const canModify = canDirect || canRequest;
-  const { openTask } = useUI();
+  const isAdmin = canAccessAdmin(me.role, me.isSuperAdmin);
   const navigate = useNavigate();
-  const [tab, setTab] = useState<DetailTab>('overview');
+  const initialTab = (location.state as { tab?: DetailTab } | null)?.tab;
+  const [tab, setTab] = useState<DetailTab>(
+    initialTab === 'tasks' || initialTab === 'documents' || initialTab === 'activity' ? initialTab : 'overview',
+  );
   const [formOpen, setFormOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [joinRequested, setJoinRequested] = useState(false);
 
   const project = state.projects.find((p) => p.id === id);
 
@@ -507,17 +783,39 @@ export function ProjectDetailPage() {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const archived = project.status === 'archived';
 
+  const isLeader = isProjectLeader(project, me.id);
+  const isMember = isProjectMember(project, me.id) || isAdmin;
+  const canChangeStatus = canChangeProjectStatus(project, me);
+  const canInvite = canInviteToProject(project, me);
+  const canJoin = !isAdmin && !isProjectMember(project, me.id);
+  // Admin xóa trực tiếp; Chủ dự án gửi yêu cầu xóa để Admin duyệt.
+  const deleteMode = (isAdmin ? 'direct' : isLeader ? 'request' : 'none') as 'direct' | 'request' | 'none';
+  const docs = state.documents.filter((d) => d.projectId === project.id);
+
+  // Người chưa tham gia chỉ xem được Tổng quan + Nhiệm vụ (ẩn Hoạt động + Tài liệu).
+  const visibleTabs: { value: DetailTab; label: string }[] = [
+    { value: 'overview', label: 'Tổng quan' },
+    { value: 'tasks', label: `Nhiệm vụ (${tasks.length})` },
+    ...(isMember
+      ? [
+          { value: 'documents', label: `Tài liệu (${docs.length})` },
+          { value: 'activity', label: `Hoạt động (${activities.length})` },
+        ] as { value: DetailTab; label: string }[]
+      : []),
+  ];
+  const effectiveTab = visibleTabs.some((t) => t.value === tab) ? tab : 'overview';
+
   const toggleArchive = () => {
     dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: archived ? 'active' : 'archived' } });
     toast(archived ? 'Đã kích hoạt dự án' : 'Đã lưu trữ dự án', project.name);
   };
 
   const handleDelete = () => {
-    if (canDirect) {
+    if (isAdmin) {
       dispatch({ type: 'PROJECT_DELETE', id: project.id });
       toast('Đã xóa dự án', project.name, 'success');
     } else {
-      // Owner: gửi yêu cầu để Admin phê duyệt.
+      // Chủ dự án: gửi yêu cầu để Admin phê duyệt.
       dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
@@ -537,32 +835,21 @@ export function ProjectDetailPage() {
     navigate('/user/projects');
   };
 
+  /** Chỉ Chủ dự án + Admin được đổi trạng thái trực tiếp (tạm dừng/tiếp tục). */
   const togglePause = () => {
     const paused = project.status === 'paused';
-    if (paused) {
-      // Tiếp tục dự án: áp dụng ngay cho mọi vai trò.
-      dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: 'active', updatedAt: new Date().toISOString() } });
-      toast('Đã tiếp tục dự án', project.name);
-    } else if (canDirect) {
-      dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: 'paused', updatedAt: new Date().toISOString() } });
-      toast('Đã tạm dừng dự án', project.name);
-    } else {
-      // Owner: gửi yêu cầu tạm dừng để Admin phê duyệt.
-      dispatch({
-        type: 'PROJECT_REQUEST_CREATE',
-        request: {
-          id: newId(),
-          workspaceId: state.workspace.id,
-          type: 'pause_project',
-          projectId: project.id,
-          payload: { name: project.name },
-          status: 'pending',
-          requestedBy: state.currentUserId,
-          createdAt: new Date().toISOString(),
-        },
-      });
-      toast('Đã gửi yêu cầu tạm dừng dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
-    }
+    dispatch({
+      type: 'PROJECT_UPDATE',
+      project: { ...project, status: paused ? 'active' : 'paused', updatedAt: new Date().toISOString() },
+    });
+    toast(paused ? 'Đã tiếp tục dự án' : 'Đã tạm dừng dự án', project.name);
+  };
+
+  const requestJoin = () => {
+    void dispatch({ type: 'PROJECT_JOIN_REQUEST', projectId: project.id }).then(() => {
+      setJoinRequested(true);
+      toast('Đã gửi yêu cầu tham gia', `Chủ dự án "${project.name}" sẽ duyệt yêu cầu của bạn.`);
+    });
   };
 
   const stats = [
@@ -592,23 +879,41 @@ export function ProjectDetailPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setFormOpen(true)}>
-            <Pencil className="h-4 w-4" /> Sửa
-          </Button>
-          {!archived && canModify && (
-            <Button variant="outline" size="sm" onClick={togglePause}>
-              {project.status === 'paused' ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-              {project.status === 'paused' ? 'Tiếp tục' : canDirect ? 'Tạm dừng' : 'Yêu cầu tạm dừng'}
+          {canJoin ? (
+            <Button size="sm" disabled={joinRequested} onClick={requestJoin}>
+              <UserPlus className="h-4 w-4" />
+              {joinRequested ? 'Đã gửi yêu cầu tham gia' : 'Xin tham gia'}
             </Button>
-          )}
-          <Button variant="outline" size="sm" onClick={toggleArchive}>
-            {archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
-            {archived ? 'Kích hoạt' : 'Lưu trữ'}
-          </Button>
-          {canModify && (
-            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
-              <Trash2 className="h-4 w-4" /> {canDirect ? 'Xóa' : 'Yêu cầu xóa'}
-            </Button>
+          ) : (
+            <>
+              {canInvite && (
+                <Button variant="outline" size="sm" onClick={() => setInviteOpen(true)}>
+                  <UserPlus className="h-4 w-4" /> Mời thành viên
+                </Button>
+              )}
+              {canChangeStatus && (
+                <Button variant="outline" size="sm" onClick={() => setFormOpen(true)}>
+                  <Pencil className="h-4 w-4" /> Sửa
+                </Button>
+              )}
+              {!archived && canChangeStatus && (
+                <Button variant="outline" size="sm" onClick={togglePause}>
+                  {project.status === 'paused' ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                  {project.status === 'paused' ? 'Tiếp tục' : 'Tạm dừng'}
+                </Button>
+              )}
+              {canChangeStatus && (
+                <Button variant="outline" size="sm" onClick={toggleArchive}>
+                  {archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                  {archived ? 'Kích hoạt' : 'Lưu trữ'}
+                </Button>
+              )}
+              {deleteMode !== 'none' && (
+                <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
+                  <Trash2 className="h-4 w-4" /> {isAdmin ? 'Xóa' : 'Yêu cầu xóa'}
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -643,16 +948,12 @@ export function ProjectDetailPage() {
 
       {/* Tabs */}
       <Tabs<DetailTab>
-        value={tab}
+        value={effectiveTab}
         onChange={setTab}
-        tabs={[
-          { value: 'overview', label: 'Tổng quan' },
-          { value: 'tasks', label: `Nhiệm vụ (${tasks.length})` },
-          { value: 'activity', label: `Hoạt động (${activities.length})` },
-        ]}
+        tabs={visibleTabs}
       />
 
-      {tab === 'overview' && (
+      {effectiveTab === 'overview' && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
             <CardHeader>
@@ -666,7 +967,7 @@ export function ProjectDetailPage() {
               )}
               <dl className="mt-5 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
                 <div>
-                  <dt className="text-muted-foreground">Người quản lý</dt>
+                  <dt className="text-muted-foreground">Chủ dự án (Leader)</dt>
                   <dd className="mt-0.5 font-medium">{manager?.name ?? '—'}</dd>
                 </div>
                 <div>
@@ -695,50 +996,27 @@ export function ProjectDetailPage() {
                   <Avatar name={m.name} avatarUrl={m.avatarUrl} size="sm" />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
-                      {m.name} {m.id === project.managerId && <Badge tone="primary" className="ml-1">Quản lý</Badge>}
+                      {m.name} {m.id === project.managerId && <Badge tone="primary" className="ml-1">Leader</Badge>}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">{m.title || 'Thành viên'}</p>
                   </div>
                 </div>
               ))}
+              {canInvite && (
+                <Button variant="outline" size="sm" className="mt-1" onClick={() => setInviteOpen(true)}>
+                  <UserPlus className="h-4 w-4" /> Mời thành viên
+                </Button>
+              )}
             </CardContent>
           </Card>
         </div>
       )}
 
-      {tab === 'tasks' && (
-        <Card>
-          <CardContent className="flex flex-col divide-y p-0">
-            {tasks.length === 0 && (
-              <div className="p-5">
-                <EmptyState icon={<List className="h-6 w-6" />} title="Chưa có nhiệm vụ" desc="Dự án này chưa có nhiệm vụ nào." />
-              </div>
-            )}
-            {tasks.map((t) => {
-              const due = dueLabel(t.dueDate, t.status);
-              const assignees = t.assigneeIds
-                .map((aid) => userById(state.users, aid))
-                .filter((u): u is User => Boolean(u));
-              return (
-                <button key={t.id} onClick={() => openTask(t.id)} className="flex flex-col gap-2 p-4 text-left transition-colors hover:bg-accent/50 sm:flex-row sm:items-center">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{t.title}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{t.code}</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <TaskStatusBadge status={t.status} />
-                    <PriorityBadge priority={t.priority} />
-                    <span className={cn('text-xs font-medium', DUE_TONE_CLASS[due.tone])}>{due.text}</span>
-                    {assignees.length > 0 && <AvatarStack users={assignees} max={3} size="xs" />}
-                  </div>
-                </button>
-              );
-            })}
-          </CardContent>
-        </Card>
-      )}
+      {effectiveTab === 'tasks' && <ProjectTaskBoard projectId={project.id} />}
 
-      {tab === 'activity' && (
+      {effectiveTab === 'documents' && <ProjectDocuments projectId={project.id} />}
+
+      {effectiveTab === 'activity' && (
         <Card>
           <CardContent className="flex flex-col divide-y p-0">
             {activities.length === 0 && (
@@ -767,11 +1045,12 @@ export function ProjectDetailPage() {
       )}
 
       <ProjectForm open={formOpen} initial={project} onClose={() => setFormOpen(false)} />
+      <InviteMembersDialog project={project} open={inviteOpen} onClose={() => setInviteOpen(false)} />
       <ConfirmDialog
         open={confirmDelete}
-        title={canDirect ? 'Xóa dự án?' : 'Gửi yêu cầu xóa dự án?'}
-        desc={canDirect ? `Dự án "${project.name}" sẽ bị xóa khỏi workspace. Hành động này không thể hoàn tác.` : 'Yêu cầu của bạn sẽ được gửi đến Admin để phê duyệt.'}
-        confirmLabel={canDirect ? 'Xóa dự án' : 'Gửi yêu cầu'}
+        title={isAdmin ? 'Xóa dự án?' : 'Gửi yêu cầu xóa dự án?'}
+        desc={isAdmin ? `Dự án "${project.name}" sẽ bị xóa khỏi workspace. Hành động này không thể hoàn tác.` : 'Yêu cầu của bạn sẽ được gửi đến Admin để phê duyệt.'}
+        confirmLabel={isAdmin ? 'Xóa dự án' : 'Gửi yêu cầu'}
         onCancel={() => setConfirmDelete(false)}
         onConfirm={handleDelete}
       />
