@@ -1,9 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
-import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
 import { Hexagon } from 'lucide-react';
-import { useApp, useCurrentUser } from './store/AppContext';
+import { taskById, useApp, useCurrentUser } from './store/AppContext';
 import { useUI } from './components/layout/UIContext';
-import { canAccessAdmin } from './lib/roles';
+import { canAccessAdmin, visibleProjects } from './lib/roles';
+import { toast } from './components/ui/toast';
 import { AppShell } from './components/layout/AppShell';
 import { LoginPage, RegisterPage, ForgotPasswordPage } from './features/auth/AuthPages';
 import { DashboardPage } from './features/dashboard/DashboardPage';
@@ -64,14 +65,37 @@ const LEGACY_PREFIXES = [
  * Deep link cũ tới một nhiệm vụ (vd: link trong thông báo `/user/tasks/<id>`):
  * mở drawer chi tiết nhiệm vụ rồi chuyển về Tổng quan.
  * (Trang danh sách Nhiệm vụ `/user/tasks` đã bỏ — chuyển về `/user/projects`.)
+ * LƯU Ý: không render `<Navigate>` — effect của `<Navigate>` chạy trước effect
+ * của component này nên trang đã chuyển đi trước khi drawer kịp mở.
+ * Điều hướng bằng `navigate()` trong cùng effect, sau khi đã mở drawer.
+ * Nhiệm vụ không tồn tại hoặc ngoài dự án mình được thấy thì báo rõ và
+ * chỉ chuyển về Tổng quan, không mở drawer trống.
  */
 function TaskDeepLink() {
   const { openTask } = useUI();
+  const { state } = useApp();
+  const me = useCurrentUser();
   const { id } = useParams();
+  const navigate = useNavigate();
+  const done = useRef(false);
   useEffect(() => {
-    if (id) openTask(id);
-  }, [id, openTask]);
-  return <Navigate to="/user" replace />;
+    if (done.current) return;
+    done.current = true;
+    const task = id ? taskById(state.tasks, id) : undefined;
+    const visible =
+      task && visibleProjects(state.projects, me).some((p) => p.id === task.projectId);
+    if (task && visible) {
+      openTask(task.id);
+    } else {
+      toast(
+        'Không mở được nhiệm vụ này',
+        'Nhiệm vụ có thể đã bị xóa hoặc bạn không có quyền xem.',
+        'error',
+      );
+    }
+    navigate('/user', { replace: true });
+  }, [id, openTask, navigate, state.tasks, state.projects, me]);
+  return null;
 }
 
 function Fallback() {
