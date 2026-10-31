@@ -12,7 +12,6 @@ import { MyTasksPage } from './features/tasks/TasksPage';
 import { CalendarPage } from './features/calendar/CalendarPage';
 import { GanttPage } from './features/timeline/GanttPage';
 import { TeamPage } from './features/team/TeamPage';
-import { ReportsPage } from './features/reports/ReportsPage';
 import { NotificationsPage } from './features/notifications/NotificationsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { AdminShell, AdminOverviewPage, ApprovalsPage, AdminLogsPage, RequireAdmin } from './features/admin/AdminPages';
@@ -58,7 +57,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 /** Các đường dẫn cũ (trước khi chuyển sang /user/*) tự chuyển sang vị trí mới. */
 const LEGACY_PREFIXES = [
   'projects', 'tasks', 'my-tasks', 'calendar', 'timeline',
-  'team', 'documents', 'reports', 'notifications', 'settings',
+  'team', 'documents', 'notifications', 'settings',
 ];
 
 /**
@@ -133,7 +132,7 @@ export default function App() {
           <Route path="timeline" element={<GanttPage />} />
           <Route path="team" element={<TeamPage />} />
           <Route path="documents" element={<Navigate to="/user/projects" replace />} />
-          <Route path="reports" element={<ReportsPage />} />
+          <Route path="reports" element={<Navigate to="/user" replace />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
@@ -163,3 +162,4 @@ export default function App() {
     </BrowserRouter>
   );
 }
+
