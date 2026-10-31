@@ -13,8 +13,7 @@ const CRUMBS: Record<string, string> = {
   'my-tasks': 'Công việc của tôi',
   calendar: 'Lịch',
   timeline: 'Timeline',
-  team: 'Nhóm & Nhân sự',
-  reports: 'Báo cáo & Phân tích',
+  team: 'Nhân sự',
   notifications: 'Thông báo',
   settings: 'Cài đặt',
 };
@@ -154,3 +153,4 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
     </header>
   );
 }
+

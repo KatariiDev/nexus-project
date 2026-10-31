@@ -71,7 +71,7 @@ export function TeamPage() {
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
-        title="Nhóm & Nhân sự"
+        title="Nhân sự"
         desc={`${state.users.length} thành viên trong workspace`}
       />
 
@@ -185,3 +185,4 @@ export function TeamPage() {
     </div>
   );
 }
+

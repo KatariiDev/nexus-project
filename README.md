@@ -11,9 +11,8 @@ Nền tảng quản lý dự án chuyên nghiệp cho doanh nghiệp, đội nh�
 - **Nhiệm vụ:** Kanban kéo thả (dnd-kit) và Table view trong tab Nhiệm vụ của từng dự án (sắp xếp, lọc, chọn nhiều + thao tác hàng loạt), Công việc của tôi (nhóm Quá hạn/Hôm nay/Sắp đến hạn/Hoàn thành), Task Detail Drawer (mô tả, checklist, phụ thuộc, bình luận, đính kèm, lịch sử).
 - **Lịch:** xem Tháng/Tuần/Ngày, lọc theo dự án/trạng thái, tạo nhanh nhiệm vụ từ ô ngày.
 - **Timeline (Gantt):** scale Ngày/Tuần/Tháng, thanh tiến độ, tô nổi bật quá hạn, đường phụ thuộc.
-- **Nhóm & Nhân sự:** danh sách, workload, mời thành viên, phân quyền (Admin/Leader/Member — Leader là Chủ dự án).
+- **Nhân sự:** danh sách, workload, phân quyền (Admin/Leader/Member — Leader là Chủ dự án).
 - **Thông báo:** theo sự kiện (giao việc, sắp đến hạn, quá hạn, nhắc tên...), đánh dấu đã đọc.
-- **Báo cáo:** KPI + biểu đồ từ dữ liệu thật, lọc theo thời gian/dự án/thành viên, xuất CSV.
 - **Tài liệu:** tab con trong chi tiết dự án — tài liệu chữ (CRUD) + kéo-thả upload tệp (ảnh, PDF, Word, Excel, video) vào bucket `project-documents`.
 - **Tìm kiếm toàn cục:** `Ctrl/Cmd + K` tìm dự án/nhiệm vụ/thành viên/tài liệu.
 - **Tạo nhanh:** nút "Tạo mới" cho dự án/nhiệm vụ/thành viên/tài liệu.
@@ -79,7 +78,7 @@ src/
   components/ui/        # Button, Card, Badge, Dialog, Dropdown, Avatar...
   components/layout/    # Sidebar, Header, AppShell, SearchOverlay, QuickCreate
   features/             # dashboard, projects, tasks, calendar, timeline,
-                        # team, documents, reports, notifications, settings, auth
+                        # team, documents, notifications, settings, auth
   store/AppContext.tsx  # state toàn cục: session Supabase, tải dữ liệu workspace,
                         # dispatch bất đồng bộ (ghi DB trước, rồi cập nhật UI)
   lib/                  # utils, format ngày giờ (vi), supabase client
@@ -105,8 +104,7 @@ Component --dispatch(action)--> AppContext --persistAction()--> Supabase
 
 ## Roadmap
 
-- [x] UI đầy đủ (CRUD, Kanban, Gantt, báo cáo, xuất CSV)
+- [x] UI đầy đủ (CRUD, Kanban, Gantt)
 - [x] Schema Supabase + RLS + Storage
 - [x] Lớp truy cập dữ liệu Supabase + Auth thật (thay store demo)
 - [ ] Realtime notifications/subscriptions
-- [ ] Xuất PDF báo cáo

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Briefcase, ListChecks, CalendarDays, Milestone,
-  Users, BarChart3, Bell, Settings, ChevronsLeft, ChevronsRight, Hexagon,
+  Users, Bell, Settings, ChevronsLeft, ChevronsRight, Hexagon,
   ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -15,8 +15,7 @@ export const NAV_ITEMS = [
   { to: '/user/my-tasks', label: 'Công việc của tôi', icon: ListChecks },
   { to: '/user/calendar', label: 'Lịch', icon: CalendarDays },
   { to: '/user/timeline', label: 'Timeline', icon: Milestone },
-  { to: '/user/team', label: 'Nhóm & Nhân sự', icon: Users },
-  { to: '/user/reports', label: 'Báo cáo', icon: BarChart3 },
+  { to: '/user/team', label: 'Nhân sự', icon: Users },
   { to: '/user/notifications', label: 'Thông báo', icon: Bell },
   { to: '/user/settings', label: 'Cài đặt', icon: Settings },
 ];
@@ -126,3 +125,4 @@ export function Sidebar() {
     </aside>
   );
 }
+
