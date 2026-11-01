@@ -74,7 +74,7 @@ type SortKey = 'newest' | 'deadline' | 'progress';
 export function ProjectsPage() {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
-  const canDirect = canDirectProjectAction(me.role);
+  const canDirect = canDirectProjectAction(me.role, me.isSuperAdmin);
   const canRequest = canRequestProjects(me.role);
   const canCreate = canDirect || canRequest;
   const isAdmin = canAccessAdmin(me.role, me.isSuperAdmin);
@@ -185,7 +185,7 @@ export function ProjectsPage() {
         actions={
           canCreate ? (
             <Button onClick={openCreate}>
-              <Plus className="h-4 w-4" /> {canDirect ? 'Tạo dự án' : 'Yêu cầu tạo dự án'}
+              <Plus className="h-4 w-4" /> Tạo dự án
             </Button>
           ) : undefined
         }
@@ -307,7 +307,7 @@ export function ProjectsPage() {
           action={
             canCreate ? (
               <Button onClick={openCreate}>
-                <Plus className="h-4 w-4" /> {canDirect ? 'Tạo dự án' : 'Yêu cầu tạo dự án'}
+                <Plus className="h-4 w-4" /> Tạo dự án
               </Button>
             ) : undefined
           }

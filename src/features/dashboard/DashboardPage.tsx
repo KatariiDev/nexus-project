@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Area,
@@ -34,8 +34,7 @@ import { EmptyState } from '../../components/ui/feedback';
 import { dueLabel, greeting, isOverdue, timeAgo, todayLong } from '../../lib/format';
 import { TASK_STATUSES } from '../../types';
 import type { ActivityLog, TaskStatus } from '../../types';
-import { ProjectForm } from '../projects/ProjectForm';
-import { visibleProjects, canDirectProjectAction, canRequestProjects } from '../../lib/roles';
+import { visibleProjects } from '../../lib/roles';
 import { cn } from '../../lib/utils';
 
 const PIE_COLORS: Record<TaskStatus, string> = {
@@ -68,7 +67,6 @@ export function DashboardPage() {
   const user = useCurrentUser();
   const { openTask, setQuickCreateOpen, setQuickCreateTab } = useUI();
   const navigate = useNavigate();
-  const [formOpen, setFormOpen] = useState(false);
 
   // Member chỉ thấy số liệu của các dự án đã tham gia (Admin thấy tất cả).
   const visibleProjectsList = useMemo(() => visibleProjects(state.projects, user), [state.projects, user]);
@@ -77,7 +75,6 @@ export function DashboardPage() {
     () => state.tasks.filter((t) => visibleIds.has(t.projectId)),
     [state.tasks, visibleIds],
   );
-  const canCreateProject = canDirectProjectAction(user.role) || canRequestProjects(user.role);
 
   const stats = useMemo(() => {
     const activeProjects = visibleProjectsList.filter((p) => p.status === 'active').length;
@@ -193,11 +190,6 @@ export function DashboardPage() {
           <p className="mt-1 text-sm text-muted-foreground">{todayLong()}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {canCreateProject && (
-            <Button variant="outline" onClick={() => setFormOpen(true)}>
-              <Plus className="h-4 w-4" /> Tạo dự án
-            </Button>
-          )}
           <Button
             onClick={() => {
               setQuickCreateTab('task');
@@ -299,7 +291,12 @@ export function DashboardPage() {
               <EmptyState
                 icon={<FolderKanban className="h-6 w-6" />}
                 title="Chưa có dự án"
-                desc={canCreateProject ? 'Tạo dự án đầu tiên để bắt đầu.' : 'Bạn chưa tham gia dự án nào.'}
+                desc="Bạn chưa tham gia dự án nào. Vào trang Dự án để xem hoặc tạo dự án mới."
+                action={
+                  <Button variant="outline" onClick={() => navigate('/user/projects')}>
+                    Đi tới trang Dự án <ArrowRight className="h-4 w-4" />
+                  </Button>
+                }
               />
             )}
             {recentProjects.map((p) => {
@@ -422,7 +419,6 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <ProjectForm open={formOpen} onClose={() => setFormOpen(false)} />
     </div>
   );
 }

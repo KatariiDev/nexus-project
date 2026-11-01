@@ -11,7 +11,7 @@ Nền tảng quản lý dự án chuyên nghiệp cho doanh nghiệp, đội nh�
 - **Nhiệm vụ:** Kanban kéo thả (dnd-kit) và Table view trong tab Nhiệm vụ của từng dự án (sắp xếp, lọc, chọn nhiều + thao tác hàng loạt), Công việc của tôi (nhóm Quá hạn/Hôm nay/Sắp đến hạn/Hoàn thành), Task Detail Drawer (mô tả, checklist, phụ thuộc, bình luận, đính kèm, lịch sử).
 - **Lịch:** xem Tháng/Tuần/Ngày, lọc theo dự án/trạng thái, tạo nhanh nhiệm vụ từ ô ngày.
 - **Timeline (Gantt):** scale Ngày/Tuần/Tháng, thanh tiến độ, tô nổi bật quá hạn, đường phụ thuộc.
-- **Nhân sự:** danh sách, workload, phân quyền (Admin/Leader/Member — Leader là Chủ dự án).
+- **Nhân sự:** danh sách, workload, phân quyền (Admin/Member — Leader là Chủ dự án, chỉ là chức trong dự án).
 - **Thông báo:** theo sự kiện (giao việc, sắp đến hạn, quá hạn, nhắc tên...), đánh dấu đã đọc.
 - **Tài liệu:** tab con trong chi tiết dự án — tài liệu chữ (CRUD) + kéo-thả upload tệp (ảnh, PDF, Word, Excel, video) vào bucket `project-documents`.
 - **Tìm kiếm toàn cục:** `Ctrl/Cmd + K` tìm dự án/nhiệm vụ/thành viên/tài liệu.
@@ -89,7 +89,7 @@ supabase/migrations/    # schema + RLS policies + bootstrap workspace
 
 ## Phân quyền
 
-Vai trò workspace chỉ còn 3: **Admin / Leader / Member** (Leader = Chủ dự án, người tạo dự án). Chỉ Leader của dự án + Admin được đổi trạng thái dự án; duyệt nhiệm vụ = Admin + Leader của dự án đó; gán vai trò workspace = chỉ Admin. Thành viên chỉ thấy dự án đã tham gia (Admin thấy tất cả). RLS ở DB vẫn dùng các giá trị vai trò cũ trong giai đoạn chuyển đổi; FE map giá trị cũ về `member` (fail closed). Xem chi tiết trong `supabase/migrations/20261018000002_rls_and_storage.sql`.
+Vai trò workspace chỉ còn 2: **Admin / Member** (Member là chủ workspace của họ, được gửi yêu cầu tạo dự án; Leader = Chủ dự án, người tạo dự án — chỉ là chức trong dự án, không phải role workspace). Chỉ Leader của dự án + Admin được đổi trạng thái dự án; duyệt nhiệm vụ = Admin + Leader của dự án đó; gán vai trò workspace = chỉ Admin. Member chỉ thấy dự án đã tham gia (Admin thấy tất cả). RLS ở DB vẫn dùng các giá trị vai trò cũ trong giai đoạn chuyển đổi; FE map giá trị cũ (`owner`/`manager`/`viewer`/`leader`) về `member` (fail closed). Xem chi tiết trong `supabase/migrations/20261018000002_rls_and_storage.sql`.
 
 ## Kiến trúc dữ liệu
 

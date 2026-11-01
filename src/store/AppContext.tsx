@@ -692,7 +692,7 @@ function assertProjectMembership(state: AppState, action: Action): void {
 }
 
 /**
- * Quy tắc phê duyệt dự án: Leader gửi yêu cầu tạo dự án để Admin duyệt.
+ * Quy tắc phê duyệt dự án: Member gửi yêu cầu tạo dự án để Admin duyệt.
  * Người gửi yêu cầu khi được duyệt sẽ làm Leader (Chủ dự án) của dự án đó.
  * Chỉ Admin được duyệt hoặc từ chối yêu cầu.
  * Đổi trạng thái dự án (tạm dừng/lưu trữ/...) chỉ Leader của dự án đó + Admin
@@ -707,20 +707,20 @@ function assertProjectPermission(state: AppState, action: Action): void {
   if (action.type === 'PROJECT_REQUEST_REVIEW' && !canReviewProjectRequests(role, isSuperAdmin)) {
     throw new Error('Chỉ Admin mới được duyệt yêu cầu.');
   }
-  // Leader gửi yêu cầu tạo dự án; yêu cầu tạm dừng/xóa (nếu còn) phải là Leader của dự án đó.
+  // Member gửi yêu cầu tạo dự án; yêu cầu tạm dừng/xóa (nếu còn) phải là Leader của dự án đó.
   if (action.type === 'PROJECT_REQUEST_CREATE') {
     if (action.request.projectId) {
       const proj = state.projects.find((p) => p.id === action.request.projectId);
       const isLeader = proj ? isProjectLeader(proj, state.currentUserId) : false;
-      if (!isLeader && !canDirectProjectAction(role) && !isSuperAdmin) {
+      if (!isLeader && !canDirectProjectAction(role, isSuperAdmin)) {
         throw new Error('Chỉ Chủ dự án mới được gửi yêu cầu cho dự án này.');
       }
     } else if (!canRequestProjects(role)) {
-      throw new Error('Chỉ Leader mới được gửi yêu cầu tạo dự án (Admin nâng vai trò cho bạn trong trang Nhân sự).');
+      throw new Error('Chỉ thành viên workspace mới được gửi yêu cầu tạo dự án.');
     }
   }
   // Admin làm trực tiếp, không cần qua duyệt.
-  if (canDirectProjectAction(role) || isSuperAdmin) return;
+  if (canDirectProjectAction(role, isSuperAdmin)) return;
 
   if (action.type === 'PROJECT_ADD') {
     throw new Error('Bạn cần gửi yêu cầu tạo dự án để Admin phê duyệt.');

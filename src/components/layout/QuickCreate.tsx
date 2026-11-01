@@ -30,8 +30,8 @@ function useForm<T extends Record<string, string>>(initial: T) {
 function ProjectQuickForm({ onDone }: { onDone: () => void }) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
-  const canDirect = canDirectProjectAction(me.role);
-  // Leader gửi yêu cầu tạo dự án thì Chủ dự án mặc định là chính mình, không đổi được.
+  const canDirect = canDirectProjectAction(me.role, me.isSuperAdmin);
+  // Member gửi yêu cầu tạo dự án thì Chủ dự án mặc định là chính mình, không đổi được.
   const managerLocked = !canDirect;
   const f = useForm({ name: '', code: '', description: '', status: 'planning' as string, priority: 'medium' as string, managerId: state.currentUserId, startDate: '', endDate: '' });
   // Thành viên được chọn (mặc định có chính mình; bỏ tick để gỡ, tick để thêm).
@@ -68,7 +68,7 @@ function ProjectQuickForm({ onDone }: { onDone: () => void }) {
       });
       toast('Tạo dự án thành công', f.values.name.trim());
     } else {
-      // Leader: gửi yêu cầu để Admin phê duyệt.
+      // Member: gửi yêu cầu để Admin phê duyệt.
       dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {

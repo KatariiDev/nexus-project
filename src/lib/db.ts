@@ -119,13 +119,13 @@ function mapUser(p: DbProfile, role: string): User {
 }
 
 /**
- * Chuẩn hóa vai trò từ DB về 3 vai trò Admin / Leader / Member.
- * DB hiện tại vẫn có thể chứa giá trị cũ ('owner'/'manager'/'viewer') vì
+ * Chuẩn hóa vai trò từ DB về 2 vai trò Admin / Member.
+ * DB hiện tại vẫn có thể chứa giá trị cũ ('owner'/'manager'/'viewer'/'leader') vì
  * CHECK constraint chưa được migrate — các giá trị cũ đều về 'member'
  * (fail closed: không tự nâng quyền cho ai) cho tới khi user migrate DB.
  */
 export function normalizeRole(role: string): WorkspaceRole {
-  if (role === 'admin' || role === 'leader' || role === 'member') return role;
+  if (role === 'admin' || role === 'member') return role;
   return 'member';
 }
 
@@ -308,7 +308,7 @@ export async function loadWorkspaceData(
     .map((m) => mapUser(m.profiles, m.role));
 
   // Admin tổng: gộp trùng user (một người có thể ở nhiều workspace), giữ role cao nhất.
-  const ROLE_RANK: Record<string, number> = { member: 0, leader: 1, admin: 2 };
+  const ROLE_RANK: Record<string, number> = { member: 0, admin: 1 };
   const deduped = new Map<string, User>();
   for (const u of users) {
     const prev = deduped.get(u.id);

@@ -1,4 +1,4 @@
-export type WorkspaceRole = 'admin' | 'leader' | 'member';
+export type WorkspaceRole = 'admin' | 'member';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
@@ -112,7 +112,7 @@ export interface Notification {
   createdAt: string;
 }
 
-/** Yêu cầu phê duyệt liên quan đến dự án (Leader gửi → Admin duyệt). */
+/** Yêu cầu phê duyệt liên quan đến dự án (Member gửi → Admin duyệt). */
 export type ProjectRequestType = 'create_project' | 'pause_project' | 'delete_project';
 export type ProjectRequestStatus = 'pending' | 'approved' | 'rejected';
 
@@ -194,8 +194,7 @@ export const PRIORITIES: { value: Priority; label: string }[] = [
 
 export const WORKSPACE_ROLES: { value: WorkspaceRole; label: string; desc: string }[] = [
   { value: 'admin', label: 'Admin', desc: 'Quản trị toàn hệ thống, phê duyệt dự án' },
-  { value: 'leader', label: 'Leader', desc: 'Chủ dự án: yêu cầu tạo dự án, quản lý dự án của mình' },
-  { value: 'member', label: 'Member', desc: 'Tham gia dự án đã join & làm nhiệm vụ' },
+  { value: 'member', label: 'Member', desc: 'Chủ workspace của mình: tham gia dự án đã join, gửi yêu cầu tạo dự án' },
 ];
 
 export function taskStatusLabel(s: TaskStatus): string {
