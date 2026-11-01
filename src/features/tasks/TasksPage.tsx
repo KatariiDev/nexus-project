@@ -434,7 +434,7 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
     setActiveId(null);
   };
 
-  const handleDragEnd = (e: DragEndEvent) => {
+  const handleDragEnd = async (e: DragEndEvent) => {
     setActiveId(null);
     const id = String(e.active.id);
     const overStatus = e.over ? String(e.over.id) : null;
@@ -445,8 +445,10 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
       toast('Không thể di chuyển nhiệm vụ', 'Chỉ Chủ dự án hoặc Admin mới được đổi trạng thái nhiệm vụ của người khác.', 'info');
       return;
     }
-    dispatch({ type: 'TASK_MOVE', id, status: overStatus as TaskStatus });
-    toast('Đã chuyển trạng thái', `${task.code} → ${taskStatusLabel(overStatus as TaskStatus)}`);
+    // dispatch là async, trả false khi guard chặn (đồng thời tự hiện toast lỗi)
+    // nên chỉ hiện toast thành công khi đổi trạng thái thật sự thành công.
+    const ok = await dispatch({ type: 'TASK_MOVE', id, status: overStatus as TaskStatus });
+    if (ok) toast('Đã chuyển trạng thái', `${task.code} → ${taskStatusLabel(overStatus as TaskStatus)}`);
   };
 
   return (
