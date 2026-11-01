@@ -648,9 +648,38 @@ function assertApprovalPermission(state: AppState, action: Action): void {
 }
 
 /**
+ * Các field của nhiệm vụ thay đổi ngoài trạng thái.
+ * Bỏ qua `updatedAt` / `completedAt` vì hệ thống tự cập nhật theo trạng thái.
+ * Dùng để phân biệt "thành viên chỉ đổi trạng thái nhiệm vụ của mình"
+ * với "thành viên sửa nội dung nhiệm vụ" (bị chặn).
+ */
+function taskNonStatusChanges(prev: Task | undefined, next: Task): string[] {
+  if (!prev) return ['task'];
+  const keys = [
+    'title', 'description', 'projectId', 'priority', 'assigneeIds', 'creatorId',
+    'watcherIds', 'labelIds', 'startDate', 'dueDate', 'estimateHours', 'actualHours',
+    'code', 'createdAt',
+  ] as const;
+  const changed: string[] = [];
+  for (const k of keys) {
+    const a = prev[k];
+    const b = next[k];
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (JSON.stringify(a ?? null) !== JSON.stringify(b ?? null)) changed.push(k);
+    } else if (a !== b) {
+      changed.push(k);
+    }
+  }
+  return changed;
+}
+
+/**
  * Quy tắc quyền trong dự án:
- * Người dùng chỉ có quyền tạo task, sửa task, bình luận, checklist trong các dự án
- * mà mình là Member hoặc Leader (hoặc tài khoản là Admin / Admin tổng).
+ * - Chỉ Leader của dự án (+ Admin / Admin tổng, đã bypass ở trên) được
+ *   tạo / sửa / xóa nhiệm vụ và thêm/gỡ nhiệm vụ phụ thuộc.
+ * - Thành viên chỉ được đổi TRẠNG THÁI nhiệm vụ được giao cho mình
+ *   (luồng duyệt "Chờ duyệt" vẫn do assertApprovalPermission giữ).
+ * - Bình luận / checklist: mọi thành viên dự án vẫn dùng được.
  * Đối với các dự án khác, người dùng không có quyền can thiệp.
  */
 function assertProjectMembership(state: AppState, action: Action): void {
@@ -666,6 +695,13 @@ function assertProjectMembership(state: AppState, action: Action): void {
     targetProjectId = task?.projectId;
   } else if (action.type === 'TASK_UPDATE') {
     targetProjectId = action.task.projectId;
+  } else if (action.type === 'DEPENDENCY_ADD') {
+    const task = state.tasks.find((t) => t.id === action.taskId);
+    targetProjectId = task?.projectId;
+  } else if (action.type === 'DEPENDENCY_DELETE') {
+    const dep = state.dependencies.find((d) => d.id === action.id);
+    const task = dep ? state.tasks.find((t) => t.id === dep.taskId) : undefined;
+    targetProjectId = task?.projectId;
   } else if (action.type === 'COMMENT_ADD') {
     const task = state.tasks.find((t) => t.id === action.taskId);
     targetProjectId = task?.projectId;
@@ -688,6 +724,44 @@ function assertProjectMembership(state: AppState, action: Action): void {
 
   if (action.type === 'PROJECT_UPDATE' && !isLeader) {
     throw new Error('Chỉ Admin hoặc Chủ dự án mới được chỉnh sửa dự án này.');
+  }
+
+  // Tạo / xóa nhiệm vụ và thêm/gỡ nhiệm vụ phụ thuộc: chỉ Leader.
+  if (
+    action.type === 'TASK_ADD' ||
+    action.type === 'TASK_DELETE' ||
+    action.type === 'DEPENDENCY_ADD' ||
+    action.type === 'DEPENDENCY_DELETE'
+  ) {
+    if (!isLeader) {
+      throw new Error(
+        action.type === 'TASK_ADD'
+          ? 'Chỉ Chủ dự án hoặc Admin mới được tạo nhiệm vụ.'
+          : action.type === 'TASK_DELETE'
+            ? 'Chỉ Chủ dự án hoặc Admin mới được xóa nhiệm vụ.'
+            : 'Chỉ Chủ dự án hoặc Admin mới được thêm/gỡ nhiệm vụ phụ thuộc.',
+      );
+    }
+  }
+
+  // Sửa nhiệm vụ: chỉ Leader, ngoại trừ thành viên đổi TRẠNG THÁI
+  // nhiệm vụ được giao cho mình (mọi field khác giữ nguyên).
+  if (action.type === 'TASK_UPDATE' && !isLeader) {
+    const prev = state.tasks.find((t) => t.id === action.task.id);
+    const isAssignee = prev?.assigneeIds.includes(state.currentUserId) ?? false;
+    const changed = taskNonStatusChanges(prev, action.task);
+    if (!prev || !isAssignee || changed.length > 0) {
+      throw new Error('Chỉ Chủ dự án hoặc Admin mới được chỉnh sửa nhiệm vụ. Thành viên chỉ được đổi trạng thái nhiệm vụ của mình.');
+    }
+  }
+
+  // Đổi trạng thái (kéo-thả / checkbox / thao tác hàng loạt):
+  // thành viên chỉ được đổi nhiệm vụ được giao cho mình.
+  if (action.type === 'TASK_MOVE' && !isLeader) {
+    const task = state.tasks.find((t) => t.id === action.id);
+    if (task && !task.assigneeIds.includes(state.currentUserId)) {
+      throw new Error('Chỉ Chủ dự án hoặc Admin mới được đổi trạng thái nhiệm vụ của người khác.');
+    }
   }
 
   if (!isLeader && !isMember) {

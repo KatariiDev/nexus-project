@@ -8,7 +8,7 @@ import {
 import { projectById, taskById, useApp, useCurrentUser, userById } from '../../store/AppContext';
 import type { Priority, Task, TaskStatus, User } from '../../types';
 import { PRIORITIES, TASK_STATUSES } from '../../types';
-import { Badge } from '../../components/ui/badge';
+import { Badge, PriorityBadge, TaskStatusBadge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Input, Select, Textarea } from '../../components/ui/input';
 import { Avatar } from '../../components/ui/avatar';
@@ -16,8 +16,9 @@ import { Checkbox } from '../../components/ui/controls';
 import { Progress } from '../../components/ui/progress';
 import { ConfirmDialog } from '../../components/ui/feedback';
 import { toast } from '../../components/ui/toast';
-import { dueLabel, timeAgo } from '../../lib/format';
+import { dueLabel, fmtDate, timeAgo } from '../../lib/format';
 import { cn, newId } from '../../lib/utils';
+import { canManageTaskForProject } from '../../lib/roles';
 import { dateInputToISO, isoToDateInput } from './helpers';
 
 const dueToneClass: Record<string, string> = {
@@ -92,6 +93,22 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
   const project = projectById(state.projects, task.projectId);
+
+  // Chỉ Leader của dự án + Admin được sửa/xóa nhiệm vụ. Thành viên chỉ xem,
+  // ngoại trừ đổi trạng thái nhiệm vụ được giao cho mình và bình luận/checklist.
+  const canManage = !!project && canManageTaskForProject(project, me);
+  const isAssignee = task.assigneeIds.includes(me.id);
+  const canChangeStatus = canManage || isAssignee;
+  // Giao nhiệm vụ chỉ cho thành viên trong dự án đó.
+  const projectMemberUsers = project
+    ? state.users.filter((u) => u.id === project.managerId || project.memberIds.includes(u.id))
+    : [];
+  const assignedUsers = task.assigneeIds
+    .map((id) => userById(state.users, id))
+    .filter((u): u is User => Boolean(u));
+  const watchedUsers = task.watcherIds
+    .map((id) => userById(state.users, id))
+    .filter((u): u is User => Boolean(u));
 
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -171,14 +188,18 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
       <div className="flex items-start justify-between gap-3 border-b p-4">
         <div className="min-w-0 flex-1">
           <Badge tone="muted" className="font-mono">{task.code}</Badge>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={saveTitle}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-            className="mt-2 w-full rounded-md bg-transparent px-2 py-1 text-lg font-semibold outline-none hover:bg-accent/50 focus:bg-accent/50"
-            aria-label="Tiêu đề nhiệm vụ"
-          />
+          {canManage ? (
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+              className="mt-2 w-full rounded-md bg-transparent px-2 py-1 text-lg font-semibold outline-none hover:bg-accent/50 focus:bg-accent/50"
+              aria-label="Tiêu đề nhiệm vụ"
+            />
+          ) : (
+            <h2 className="mt-2 px-2 py-1 text-lg font-semibold">{task.title}</h2>
+          )}
         </div>
         <button onClick={onClose} className="rounded-md p-1.5 text-muted-foreground hover:bg-accent" aria-label="Đóng">
           <X className="h-5 w-5" />
@@ -187,16 +208,24 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
 
       {/* Trạng thái + ưu tiên */}
       <div className="flex flex-wrap items-center gap-2 border-b p-4">
-        <Select value={task.status} onChange={(e) => { update({ status: e.target.value as TaskStatus }); toast('Đã cập nhật trạng thái'); }} className="w-auto" aria-label="Trạng thái">
-          {TASK_STATUSES.map((s) => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </Select>
-        <Select value={task.priority} onChange={(e) => { update({ priority: e.target.value as Priority }); toast('Đã cập nhật mức ưu tiên'); }} className="w-auto" aria-label="Ưu tiên">
-          {PRIORITIES.map((p) => (
-            <option key={p.value} value={p.value}>{p.label}</option>
-          ))}
-        </Select>
+        {canChangeStatus ? (
+          <Select value={task.status} onChange={(e) => { update({ status: e.target.value as TaskStatus }); toast('Đã cập nhật trạng thái'); }} className="w-auto" aria-label="Trạng thái">
+            {TASK_STATUSES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </Select>
+        ) : (
+          <TaskStatusBadge status={task.status} />
+        )}
+        {canManage ? (
+          <Select value={task.priority} onChange={(e) => { update({ priority: e.target.value as Priority }); toast('Đã cập nhật mức ưu tiên'); }} className="w-auto" aria-label="Ưu tiên">
+            {PRIORITIES.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </Select>
+        ) : (
+          <PriorityBadge priority={task.priority} />
+        )}
         <span className={cn('ml-auto inline-flex items-center gap-1.5 text-sm', dueToneClass[due.tone])}>
           <CalendarDays className="h-4 w-4" />
           {due.text}
@@ -221,34 +250,80 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
             </div>
             <div>
               <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground"><Users className="h-3.5 w-3.5" />Người thực hiện</dt>
-              <UserMultiSelect users={state.users} selected={task.assigneeIds} onToggle={(id) => update({ assigneeIds: toggleId(task.assigneeIds, id) })} />
+              {canManage ? (
+                <UserMultiSelect users={projectMemberUsers} selected={task.assigneeIds} onToggle={(id) => update({ assigneeIds: toggleId(task.assigneeIds, id) })} />
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {assignedUsers.length === 0 ? (
+                    <span className="text-sm text-muted-foreground">Chưa giao</span>
+                  ) : (
+                    assignedUsers.map((u) => (
+                      <span key={u.id} className="flex items-center gap-2 text-sm">
+                        <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
+                        {u.name}
+                      </span>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground"><Eye className="h-3.5 w-3.5" />Người theo dõi</dt>
-              <UserMultiSelect users={state.users} selected={task.watcherIds} onToggle={(id) => update({ watcherIds: toggleId(task.watcherIds, id) })} />
+              {canManage ? (
+                <UserMultiSelect users={state.users} selected={task.watcherIds} onToggle={(id) => update({ watcherIds: toggleId(task.watcherIds, id) })} />
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {watchedUsers.length === 0 ? (
+                    <span className="text-sm text-muted-foreground">—</span>
+                  ) : (
+                    watchedUsers.map((u) => (
+                      <span key={u.id} className="flex items-center gap-2 text-sm">
+                        <Avatar name={u.name} avatarUrl={u.avatarUrl} size="xs" />
+                        {u.name}
+                      </span>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">Ngày bắt đầu</dt>
               <dd className="mt-1">
-                <Input type="date" value={isoToDateInput(task.startDate)} onChange={(e) => update({ startDate: dateInputToISO(e.target.value) })} />
+                {canManage ? (
+                  <Input type="date" value={isoToDateInput(task.startDate)} onChange={(e) => update({ startDate: dateInputToISO(e.target.value) })} />
+                ) : (
+                  <span className="text-sm">{fmtDate(task.startDate)}</span>
+                )}
               </dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">Deadline</dt>
               <dd className="mt-1">
-                <Input type="date" value={isoToDateInput(task.dueDate)} onChange={(e) => update({ dueDate: dateInputToISO(e.target.value) })} />
+                {canManage ? (
+                  <Input type="date" value={isoToDateInput(task.dueDate)} onChange={(e) => update({ dueDate: dateInputToISO(e.target.value) })} />
+                ) : (
+                  <span className="text-sm">{fmtDate(task.dueDate)}</span>
+                )}
               </dd>
             </div>
             <div>
               <dt className="flex items-center gap-1 text-xs text-muted-foreground"><Timer className="h-3.5 w-3.5" />Giờ ước tính</dt>
               <dd className="mt-1">
-                <Input type="number" min={0} step={0.5} value={task.estimateHours ?? ''} onChange={(e) => update({ estimateHours: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} />
+                {canManage ? (
+                  <Input type="number" min={0} step={0.5} value={task.estimateHours ?? ''} onChange={(e) => update({ estimateHours: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} />
+                ) : (
+                  <span className="text-sm">{task.estimateHours != null ? `${task.estimateHours} giờ` : '—'}</span>
+                )}
               </dd>
             </div>
             <div>
               <dt className="flex items-center gap-1 text-xs text-muted-foreground"><Timer className="h-3.5 w-3.5" />Giờ thực tế</dt>
               <dd className="mt-1">
-                <Input type="number" min={0} step={0.5} value={task.actualHours ?? ''} onChange={(e) => update({ actualHours: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} />
+                {canManage ? (
+                  <Input type="number" min={0} step={0.5} value={task.actualHours ?? ''} onChange={(e) => update({ actualHours: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} />
+                ) : (
+                  <span className="text-sm">{task.actualHours != null ? `${task.actualHours} giờ` : '—'}</span>
+                )}
               </dd>
             </div>
           </dl>
@@ -259,7 +334,15 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
           <div className="flex flex-wrap gap-2">
             {state.labels.map((l) => {
               const active = task.labelIds.includes(l.id);
-              return (
+              // Thành viên chỉ xem: chỉ hiện nhãn đã gắn, không hiện nhãn chưa gắn.
+              if (!canManage && !active) return null;
+              const chip = (
+                <>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color }} />
+                  {l.name}
+                </>
+              );
+              return canManage ? (
                 <button
                   key={l.id}
                   onClick={() => update({ labelIds: toggleId(task.labelIds, l.id) })}
@@ -268,19 +351,34 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
                     active ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:bg-accent',
                   )}
                 >
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color }} />
-                  {l.name}
+                  {chip}
                 </button>
+              ) : (
+                <span
+                  key={l.id}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground"
+                >
+                  {chip}
+                </span>
               );
             })}
+            {!canManage && task.labelIds.length === 0 && (
+              <p className="text-sm text-muted-foreground">Chưa gắn nhãn.</p>
+            )}
           </div>
         </Section>
 
         {/* Mô tả */}
         <Section icon={<FileText className="h-4 w-4" />} title="Mô tả" action={
-          <Button size="sm" variant="outline" disabled={description === task.description} onClick={saveDescription}>Lưu</Button>
+          canManage ? (
+            <Button size="sm" variant="outline" disabled={description === task.description} onClick={saveDescription}>Lưu</Button>
+          ) : undefined
         }>
-          <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="Thêm mô tả chi tiết..." />
+          {canManage ? (
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="Thêm mô tả chi tiết..." />
+          ) : (
+            <p className="whitespace-pre-wrap text-sm">{task.description || 'Chưa có mô tả.'}</p>
+          )}
         </Section>
 
         {/* Checklist */}
@@ -321,20 +419,24 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
                       <span className="mr-2 font-mono text-xs text-muted-foreground">{dep?.code}</span>
                       {dep?.title ?? 'Nhiệm vụ không tồn tại'}
                     </span>
-                    <button onClick={() => dispatch({ type: 'DEPENDENCY_DELETE', id: d.id })} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive" aria-label="Gỡ phụ thuộc">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
+                    {canManage && (
+                      <button onClick={() => dispatch({ type: 'DEPENDENCY_DELETE', id: d.id })} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive" aria-label="Gỡ phụ thuộc">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
-          <Select value={depValue} onChange={(e) => addDependency(e.target.value)} className="mt-2">
-            <option value="">Thêm nhiệm vụ phụ thuộc...</option>
-            {depCandidates.map((t) => (
-              <option key={t.id} value={t.id}>{t.code} · {t.title}</option>
-            ))}
-          </Select>
+          {canManage && (
+            <Select value={depValue} onChange={(e) => addDependency(e.target.value)} className="mt-2">
+              <option value="">Thêm nhiệm vụ phụ thuộc...</option>
+              {depCandidates.map((t) => (
+                <option key={t.id} value={t.id}>{t.code} · {t.title}</option>
+              ))}
+            </Select>
+          )}
         </Section>
 
         {/* Bình luận */}
@@ -412,12 +514,14 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
         </Section>
       </div>
 
-      {/* Footer */}
-      <div className="border-t p-4">
-        <Button variant="destructive" className="w-full" onClick={() => setConfirmDelete(true)}>
-          <Trash2 className="h-4 w-4" />Xóa nhiệm vụ
-        </Button>
-      </div>
+      {/* Footer — chỉ Leader/Admin được xóa nhiệm vụ */}
+      {canManage && (
+        <div className="border-t p-4">
+          <Button variant="destructive" className="w-full" onClick={() => setConfirmDelete(true)}>
+            <Trash2 className="h-4 w-4" />Xóa nhiệm vụ
+          </Button>
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmDelete}

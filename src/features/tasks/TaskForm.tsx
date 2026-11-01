@@ -58,10 +58,19 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
     estimateHours: initial?.estimateHours !== undefined ? String(initial.estimateHours) : '',
   });
 
-  const { register, control, handleSubmit, reset, formState: { errors } } = useForm<FormValues>({
+  const { register, control, handleSubmit, reset, watch, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: getDefaults(),
   });
+
+  // Chỉ giao nhiệm vụ cho thành viên của dự án đã chọn (Leader + memberIds).
+  const selectedProjectId = watch('projectId');
+  const selectedProject = projectById(state.projects, selectedProjectId ?? '');
+  const projectMembers = useMemo(() => {
+    if (!selectedProject) return [];
+    const ids = [selectedProject.managerId, ...selectedProject.memberIds];
+    return state.users.filter((u) => ids.includes(u.id));
+  }, [selectedProject, state.users]);
 
   useEffect(() => {
     if (open) reset(getDefaults());
@@ -77,7 +86,10 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
     const now = new Date().toISOString();
     const title = data.title.trim();
     const description = data.description ?? '';
-    const assigneeIds = data.assigneeIds ?? [];
+    // Chỉ giữ lại người thực hiện là thành viên của dự án (phòng trường hợp
+    // đổi dự án sau khi đã chọn người ở dự án cũ).
+    const projectMemberIds = new Set([project.managerId, ...project.memberIds]);
+    const assigneeIds = (data.assigneeIds ?? []).filter((id) => projectMemberIds.has(id));
     const status = data.status ?? 'todo';
     const priority = data.priority ?? 'medium';
     const labelIds = data.labelIds ?? [];
@@ -184,7 +196,10 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
               control={control}
               render={({ field }) => (
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                  {state.users.map((u) => {
+                  {projectMembers.length === 0 && (
+                    <p className="text-sm text-muted-foreground">Chọn dự án trước để xem thành viên.</p>
+                  )}
+                  {projectMembers.map((u) => {
                     const value = field.value ?? [];
                     return (
                       <label key={u.id} className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-2.5 py-2 hover:bg-accent">
