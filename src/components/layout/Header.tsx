@@ -9,12 +9,17 @@ import { fmtDateTime } from '../../lib/format';
 const CRUMBS: Record<string, string> = {
   '': 'Tổng quan',
   projects: 'Dự án',
+  tasks: 'Dự án',
   'my-tasks': 'Công việc của tôi',
   calendar: 'Lịch',
   timeline: 'Timeline',
   team: 'Nhân sự',
   notifications: 'Thông báo',
   settings: 'Cài đặt',
+  overview: 'Tổng quan',
+  approvals: 'Phê duyệt',
+  users: 'Nhân sự',
+  logs: 'Nhật ký',
 };
 
 export function Header({ onOpenSearch }: { onOpenSearch: () => void }) {
@@ -24,7 +29,9 @@ export function Header({ onOpenSearch }: { onOpenSearch: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const seg = location.pathname.split('/').filter(Boolean)[0] ?? '';
+  const parts = location.pathname.split('/').filter(Boolean);
+  // Bỏ tiền tố /user hoặc /admin, lấy đúng tên tab đang mở.
+  const seg = parts[1] ?? '';
   const crumb = CRUMBS[seg] ?? 'Nexus';
   const notifs = state.notifications.filter((n) => n.userId === state.currentUserId).slice(0, 6);
   const unread = state.notifications.filter((n) => n.userId === state.currentUserId && !n.read).length;
