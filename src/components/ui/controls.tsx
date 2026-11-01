@@ -32,7 +32,7 @@ export function Checkbox({ checked, onChange, className }: { checked: boolean; o
       onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
       className={cn(
         'flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors',
-        checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-card hover:border-primary',
+        checked ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/80 bg-card hover:border-primary',
         className,
       )}
     >
