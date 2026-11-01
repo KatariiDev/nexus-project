@@ -6,7 +6,7 @@ import {
   Clock, GripVertical, Inbox, Plus, Search, SquareKanban, Table as TableIcon, Trash2,
 } from 'lucide-react';
 import { projectById, useApp, useCurrentUser, userById } from '../../store/AppContext';
-import { visibleProjects } from '../../lib/roles';
+import { canManageTaskForProject, visibleProjects } from '../../lib/roles';
 import { useUI } from '../../components/layout/UIContext';
 import type { Priority, Task, TaskStatus, User } from '../../types';
 import { PRIORITIES, TASK_STATUSES, priorityLabel, taskStatusLabel } from '../../types';
@@ -187,7 +187,7 @@ type SortKey = 'title' | 'priority' | 'dueDate' | 'status';
 const priorityOrder: Record<Priority, number> = { low: 0, medium: 1, high: 2, urgent: 3 };
 const statusOrder: Record<TaskStatus, number> = { todo: 0, in_progress: 1, in_review: 2, done: 3 };
 
-function TaskTable({ tasks, onOpenTask }: { tasks: Task[]; onOpenTask: (id: string) => void }) {
+function TaskTable({ tasks, onOpenTask, canManage }: { tasks: Task[]; onOpenTask: (id: string) => void; canManage: boolean }) {
   const { state, dispatch } = useApp();
   const [sortKey, setSortKey] = useState<SortKey>('dueDate');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -277,7 +277,7 @@ function TaskTable({ tasks, onOpenTask }: { tasks: Task[]; onOpenTask: (id: stri
         </Select>
       </div>
 
-      {selected.length > 0 && (
+      {canManage && selected.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2.5 shadow-soft">
           <span className="text-sm font-medium">Đã chọn {selected.length}</span>
           <Select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)} className="w-44" aria-label="Đổi trạng thái hàng loạt">
@@ -300,9 +300,11 @@ function TaskTable({ tasks, onOpenTask }: { tasks: Task[]; onOpenTask: (id: stri
         <table className="w-full min-w-[940px] text-sm">
           <thead>
             <tr className="border-b bg-muted/50 text-left text-muted-foreground">
-              <th className="w-10 p-3">
-                <Checkbox checked={allSelected} onChange={() => setSelected(allSelected ? [] : rows.map((t) => t.id))} />
-              </th>
+              {canManage && (
+                <th className="w-10 p-3">
+                  <Checkbox checked={allSelected} onChange={() => setSelected(allSelected ? [] : rows.map((t) => t.id))} />
+                </th>
+              )}
               <th className="p-3"><SortBtn label="Nhiệm vụ" k="title" /></th>
               <th className="p-3">Dự án</th>
               <th className="p-3">Người thực hiện</th>
@@ -323,9 +325,11 @@ function TaskTable({ tasks, onOpenTask }: { tasks: Task[]; onOpenTask: (id: stri
                 .filter((u): u is User => Boolean(u));
               return (
                 <tr key={t.id} onClick={() => onOpenTask(t.id)} className="cursor-pointer border-b last:border-0 hover:bg-accent/50">
-                  <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                    <Checkbox checked={selected.includes(t.id)} onChange={() => toggleSelect(t.id)} />
-                  </td>
+                  {canManage && (
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox checked={selected.includes(t.id)} onChange={() => toggleSelect(t.id)} />
+                    </td>
+                  )}
                   <td className="p-3">
                     <p className="font-medium">{t.title}</p>
                     <p className="font-mono text-xs text-muted-foreground">{t.code}</p>
@@ -380,7 +384,9 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
   const [formOpen, setFormOpen] = useState(false);
 
   const project = projectById(state.projects, projectId);
-  const canAdd = !!project && (me.isSuperAdmin || me.role === 'admin' || project.memberIds.includes(me.id) || project.managerId === me.id);
+  // Chỉ Leader của dự án + Admin được tạo nhiệm vụ; thành viên chỉ xem
+  // (ngoại trừ đổi trạng thái nhiệm vụ được giao cho mình).
+  const canManage = !!project && canManageTaskForProject(project, me);
 
   const tasks = useMemo(() => {
     let list = state.tasks.filter((t) => t.projectId === projectId);
@@ -394,6 +400,11 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
     const overStatus = e.over ? String(e.over.id) : null;
     const task = state.tasks.find((t) => t.id === id);
     if (!task || !overStatus || task.status === overStatus) return;
+    // Thành viên chỉ được kéo-thả nhiệm vụ được giao cho mình.
+    if (!canManage && !task.assigneeIds.includes(me.id)) {
+      toast('Không thể di chuyển nhiệm vụ', 'Chỉ Chủ dự án hoặc Admin mới được đổi trạng thái nhiệm vụ của người khác.', 'info');
+      return;
+    }
     dispatch({ type: 'TASK_MOVE', id, status: overStatus as TaskStatus });
     toast('Đã chuyển trạng thái', `${task.code} → ${taskStatusLabel(overStatus as TaskStatus)}`);
   };
@@ -411,7 +422,7 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
             aria-label="Tìm kiếm nhiệm vụ"
           />
         </div>
-        {canAdd && (
+        {canManage && (
           <Button onClick={() => setFormOpen(true)}>
             <Plus className="h-4 w-4" />Tạo nhiệm vụ
           </Button>
@@ -434,7 +445,7 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
             title="Chưa có nhiệm vụ"
             desc="Tạo nhiệm vụ mới hoặc điều chỉnh từ khóa tìm kiếm."
             action={
-              canAdd ? (
+              canManage ? (
                 <Button onClick={() => setFormOpen(true)}>
                   <Plus className="h-4 w-4" />Tạo nhiệm vụ
                 </Button>
@@ -449,7 +460,7 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
                   key={s.value}
                   status={s}
                   tasks={tasks.filter((t) => t.status === s.value)}
-                  quickProjectId={canAdd ? projectId : undefined}
+                  quickProjectId={canManage ? projectId : undefined}
                   onOpenTask={openTask}
                 />
               ))}
@@ -457,7 +468,7 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
           </DndContext>
         )
       ) : (
-        <TaskTable tasks={tasks} onOpenTask={openTask} />
+        <TaskTable tasks={tasks} onOpenTask={openTask} canManage={canManage} />
       )}
 
       <TaskForm

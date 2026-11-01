@@ -64,6 +64,15 @@ export const canReviewTaskForProject = (
   isLeader: boolean,
 ): boolean => isSuperAdmin || role === 'admin' || isLeader;
 
+/**
+ * Được tạo / sửa / xóa nhiệm vụ của một dự án:
+ * Leader của chính dự án đó + Admin (hoặc Admin tổng).
+ * Thành viên dự án chỉ được xem, ngoại trừ đổi trạng thái nhiệm vụ
+ * được giao cho mình và bình luận / checklist trong drawer.
+ */
+export const canManageTaskForProject = (project: Project, me: User): boolean =>
+  me.isSuperAdmin || me.role === 'admin' || isProjectLeader(project, me.id);
+
 /** Được đổi trạng thái dự án (Leader của dự án đó + Admin). */
 export const canChangeProjectStatus = (
   project: Project,
