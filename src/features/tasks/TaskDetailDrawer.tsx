@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CalendarDays, Eye, FileText, Flag, History, Link2, ListChecks,
-  MessageSquare, Paperclip, Send, Tag, Timer, Trash2, Users, X,
+  MessageSquare, Paperclip, Save, Send, Tag, Timer, Trash2, Users, X,
 } from 'lucide-react';
 import { projectById, taskById, useApp, useCurrentUser, userById } from '../../store/AppContext';
 import type { Priority, Task, TaskStatus, User } from '../../types';
@@ -150,6 +150,27 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
       update({ description });
       toast('Đã lưu mô tả');
     }
+  };
+
+  // Nút "Cập nhật" ở footer: lưu một lần các trường còn giữ nháp (tiêu đề + mô tả),
+  // gộp chung vào 1 lần cập nhật để không ghi đè lẫn nhau.
+  const hasPendingEdits =
+    (title.trim() !== '' && title.trim() !== task.title) || description !== task.description;
+
+  const saveAll = async () => {
+    const t = title.trim();
+    const patch: Partial<Task> = {};
+    if (!t) {
+      setTitle(task.title);
+    } else if (t !== task.title) {
+      patch.title = t;
+    }
+    if (description !== task.description) {
+      patch.description = description;
+    }
+    if (Object.keys(patch).length === 0) return;
+    const ok = await update(patch);
+    if (ok) toast('Đã cập nhật nhiệm vụ');
   };
 
   const addChecklist = () => {
@@ -514,10 +535,19 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
         </Section>
       </div>
 
-      {/* Footer — chỉ Leader/Admin được xóa nhiệm vụ */}
+      {/* Footer — chỉ Leader/Admin được cập nhật/xóa nhiệm vụ */}
       {canManage && (
-        <div className="border-t p-4">
-          <Button variant="destructive" className="w-full" onClick={() => setConfirmDelete(true)}>
+        <div className="flex gap-2 border-t p-4">
+          <Button
+            className="flex-1"
+            disabled={!hasPendingEdits}
+            // Chặn blur của ô tiêu đề để không lưu trùng 2 lần (blur lưu 1 lần, bấm nút lưu 1 lần nữa).
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={saveAll}
+          >
+            <Save className="h-4 w-4" />Cập nhật
+          </Button>
+          <Button variant="destructive" className="flex-1" onClick={() => setConfirmDelete(true)}>
             <Trash2 className="h-4 w-4" />Xóa nhiệm vụ
           </Button>
         </div>
