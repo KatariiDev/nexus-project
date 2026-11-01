@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { DndContext, useDraggable, useDroppable } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
+import type { ReactNode } from 'react';
+import { DndContext, DragOverlay, useDraggable, useDroppable } from '@dnd-kit/core';
+import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import {
   AlertTriangle, ArrowDown, ArrowUp, CalendarDays, CheckCheck, ChevronsUpDown,
   Clock, GripVertical, Inbox, Plus, Search, SquareKanban, Table as TableIcon, Trash2,
@@ -42,9 +43,10 @@ const statusDot: Record<TaskStatus, string> = {
 
 /* ---------------- Kanban ---------------- */
 
-function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
+/* Nội dung chung của một thẻ nhiệm vụ — dùng chung cho thẻ trong cột
+ * (kéo được qua nút grip) và bản xem trước trong DragOverlay (tĩnh). */
+function TaskCardContent({ task, dragHandle }: { task: Task; dragHandle?: ReactNode }) {
   const { state } = useApp();
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id });
 
   const items = state.checklists.filter((c) => c.taskId === task.id);
   const doneCount = items.filter((c) => c.done).length;
@@ -55,26 +57,10 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const labels = state.labels.filter((l) => task.labelIds.includes(l.id));
 
   return (
-    <div
-      ref={setNodeRef}
-      onClick={onOpen}
-      style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined}
-      className={cn(
-        'cursor-pointer rounded-lg border bg-card p-3 shadow-soft transition-shadow hover:shadow-lift',
-        isDragging && 'opacity-70 shadow-lift',
-      )}
-    >
+    <>
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[11px] text-muted-foreground">{task.code}</span>
-        <button
-          {...attributes}
-          {...listeners}
-          onClick={(e) => e.stopPropagation()}
-          className="cursor-grab rounded p-1 text-muted-foreground hover:bg-accent active:cursor-grabbing"
-          aria-label="Kéo để di chuyển"
-        >
-          <GripVertical className="h-4 w-4" />
-        </button>
+        {dragHandle}
       </div>
       <p className="line-clamp-2 mt-1 text-sm font-medium leading-snug">{task.title}</p>
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -100,6 +86,48 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
         </div>
       </div>
       {items.length > 0 && <Progress value={(doneCount / items.length) * 100} className="mt-2 h-1" />}
+    </>
+  );
+}
+
+function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      onClick={onOpen}
+      className={cn(
+        'cursor-pointer rounded-lg border bg-card p-3 shadow-soft transition-shadow hover:shadow-lift',
+        // Đang kéo: thẻ gốc ở lại trong cột làm placeholder mờ, KHÔNG áp transform
+        // (bản xem trước trong DragOverlay mới là thứ đi theo con trỏ).
+        isDragging && 'opacity-40',
+      )}
+    >
+      <TaskCardContent
+        task={task}
+        dragHandle={
+          <button
+            {...attributes}
+            {...listeners}
+            onClick={(e) => e.stopPropagation()}
+            className="cursor-grab rounded p-1 text-muted-foreground hover:bg-accent active:cursor-grabbing"
+            aria-label="Kéo để di chuyển"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        }
+      />
+    </div>
+  );
+}
+
+/* Bản xem trước của task đang kéo — nổi lên trên mọi thứ qua DragOverlay,
+ * rộng đúng bằng thẻ trong cột (cột 280px trừ padding 2 bên). */
+function TaskCardPreview({ task }: { task: Task }) {
+  return (
+    <div className="w-[260px] cursor-grabbing rounded-lg border bg-card p-3 shadow-lift">
+      <TaskCardContent task={task} />
     </div>
   );
 }
@@ -382,6 +410,9 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
   const [view, setView] = useState<'kanban' | 'table'>('kanban');
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  // Task đang được kéo — dùng để hiển thị bản xem trước trong DragOverlay.
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const activeTask = activeId ? state.tasks.find((t) => t.id === activeId) : undefined;
 
   const project = projectById(state.projects, projectId);
   // Chỉ Leader của dự án + Admin được tạo nhiệm vụ; thành viên chỉ xem
@@ -395,7 +426,16 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
     return list;
   }, [state.tasks, projectId, search]);
 
+  const handleDragStart = (e: DragStartEvent) => {
+    setActiveId(String(e.active.id));
+  };
+
+  const handleDragCancel = () => {
+    setActiveId(null);
+  };
+
   const handleDragEnd = (e: DragEndEvent) => {
+    setActiveId(null);
     const id = String(e.active.id);
     const overStatus = e.over ? String(e.over.id) : null;
     const task = state.tasks.find((t) => t.id === id);
@@ -453,7 +493,7 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
             }
           />
         ) : (
-          <DndContext onDragEnd={handleDragEnd}>
+          <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
             <div className="flex gap-3 overflow-x-auto pb-2">
               {TASK_STATUSES.map((s) => (
                 <KanbanColumn
@@ -465,6 +505,11 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
                 />
               ))}
             </div>
+            {/* Bản xem trước của task đang kéo — render qua portal nên luôn
+              nổi lên trên mọi cột, không bị cắt bởi overflow của cột. */}
+            <DragOverlay>
+              {activeTask ? <TaskCardPreview task={activeTask} /> : null}
+            </DragOverlay>
           </DndContext>
         )
       ) : (
