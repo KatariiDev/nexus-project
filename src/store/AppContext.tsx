@@ -346,7 +346,7 @@ function reducer(state: AppState, action: RichAction): AppState {
 
 interface AppContextValue {
   state: AppState;
-  dispatch: (action: Action) => Promise<void>;
+  dispatch: (action: Action) => Promise<boolean>;
   signOut: () => Promise<void>;
   /** Tải lại toàn bộ dữ liệu workspace từ Supabase (dùng cho nút tải lại / realtime). */
   refresh: () => Promise<void>;
@@ -760,14 +760,14 @@ function assertMemberPermission(state: AppState, action: Action): void {
   }
 }
 
-  const dispatch = useCallback(async (action: Action) => {
+  const dispatch = useCallback(async (action: Action): Promise<boolean> => {
     // SET_THEME / TOGGLE_SIDEBAR chỉ là trạng thái giao diện cục bộ
     if (action.type === 'SET_THEME' || action.type === 'TOGGLE_SIDEBAR') {
       baseDispatch(action);
-      return;
+      return true;
     }
     const ctx = ctxRef.current;
-    if (!ctx) return;
+    if (!ctx) return false;
     try {
       assertApprovalPermission(stateRef.current, action);
       assertProjectPermission(stateRef.current, action);
@@ -775,8 +775,10 @@ function assertMemberPermission(state: AppState, action: Action): void {
       assertProjectMembership(stateRef.current, action);
       const enriched = await persistAction(getSupabase(), ctx, stateRef.current, action);
       baseDispatch(enriched);
+      return true;
     } catch (e) {
       toast('Không thể lưu thay đổi', e instanceof Error ? e.message : 'Đã xảy ra lỗi.', 'error');
+      return false;
     }
   }, []);
 

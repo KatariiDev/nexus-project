@@ -60,9 +60,9 @@ const DUE_TONE_CLASS: Record<string, string> = {
   normal: 'text-muted-foreground',
 };
 
-function fmtVND(n?: number): string {
+function fmtCoin(n?: number): string {
   if (n == null) return '—';
-  return `${new Intl.NumberFormat('vi-VN').format(n)} ₫`;
+  return `${new Intl.NumberFormat('vi-VN').format(n)} coin`;
 }
 
 type ScopeFilter = 'all' | 'mine' | 'not-joined';
@@ -987,7 +987,7 @@ export function ProjectDetailPage() {
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
               <span className="font-medium">Ngân sách</span>
               <span className="text-muted-foreground">
-                Đã dùng <span className="font-semibold text-foreground">{fmtVND(project.budgetUsed ?? 0)}</span> / {fmtVND(project.budget)}
+                Đã dùng <span className="font-semibold text-foreground">{fmtCoin(project.budgetUsed ?? 0)}</span> / {fmtCoin(project.budget)}
               </span>
             </div>
             <Progress value={project.budget > 0 ? ((project.budgetUsed ?? 0) / project.budget) * 100 : 0} />
@@ -1029,7 +1029,7 @@ export function ProjectDetailPage() {
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Ngân sách</dt>
-                  <dd className="mt-0.5 font-medium">{fmtVND(project.budget)}</dd>
+                  <dd className="mt-0.5 font-medium">{fmtCoin(project.budget)}</dd>
                 </div>
               </dl>
             </CardContent>

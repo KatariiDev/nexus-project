@@ -213,7 +213,9 @@ export function ApprovalsPage() {
   const approve = (r: ProjectRequest) => {
     setBusy(true);
     void dispatch({ type: 'PROJECT_REQUEST_REVIEW', id: r.id, approve: true })
-      .then(() => toast('Đã duyệt yêu cầu', requestName(r, state)))
+      .then((ok) => {
+        if (ok) toast('Đã duyệt yêu cầu', requestName(r, state));
+      })
       .finally(() => setBusy(false));
   };
 
@@ -221,7 +223,8 @@ export function ApprovalsPage() {
     if (!rejectTarget) return;
     setBusy(true);
     void dispatch({ type: 'PROJECT_REQUEST_REVIEW', id: rejectTarget.id, approve: false, note: note.trim() || undefined })
-      .then(() => {
+      .then((ok) => {
+        if (!ok) return;
         toast('Đã từ chối yêu cầu', requestName(rejectTarget, state));
         setRejectTarget(null);
         setNote('');
