@@ -209,7 +209,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
       {/* Trạng thái + ưu tiên */}
       <div className="flex flex-wrap items-center gap-2 border-b p-4">
         {canChangeStatus ? (
-          <Select value={task.status} onChange={(e) => { update({ status: e.target.value as TaskStatus }); toast('Đã cập nhật trạng thái'); }} className="w-auto" aria-label="Trạng thái">
+          <Select value={task.status} onChange={async (e) => { const ok = await update({ status: e.target.value as TaskStatus }); if (ok) toast('Đã cập nhật trạng thái'); }} className="w-auto" aria-label="Trạng thái">
             {TASK_STATUSES.map((s) => (
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}

@@ -272,18 +272,28 @@ function TaskTable({ tasks, onOpenTask, canManage }: { tasks: Task[]; onOpenTask
   const allSelected = rows.length > 0 && rows.every((t) => selected.includes(t.id));
   const toggleSelect = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
-  const applyBulkStatus = () => {
+  const applyBulkStatus = async () => {
     if (!bulkStatus) return;
     const st = bulkStatus as TaskStatus;
-    selected.forEach((id) => dispatch({ type: 'TASK_MOVE', id, status: st }));
-    toast('Đã cập nhật hàng loạt', `${selected.length} nhiệm vụ → ${taskStatusLabel(st)}`);
+    const results = await Promise.all(selected.map((id) => dispatch({ type: 'TASK_MOVE', id, status: st })));
+    const okCount = results.filter(Boolean).length;
+    if (okCount === selected.length) {
+      toast('Đã cập nhật hàng loạt', `${selected.length} nhiệm vụ → ${taskStatusLabel(st)}`);
+    } else if (okCount > 0) {
+      toast('Đã cập nhật hàng loạt', `Đã cập nhật ${okCount}/${selected.length} nhiệm vụ → ${taskStatusLabel(st)}`);
+    }
     setSelected([]);
     setBulkStatus('');
   };
 
-  const bulkDelete = () => {
-    selected.forEach((id) => dispatch({ type: 'TASK_DELETE', id }));
-    toast('Đã xóa', `${selected.length} nhiệm vụ đã được xóa`);
+  const bulkDelete = async () => {
+    const results = await Promise.all(selected.map((id) => dispatch({ type: 'TASK_DELETE', id })));
+    const okCount = results.filter(Boolean).length;
+    if (okCount === selected.length) {
+      toast('Đã xóa', `${selected.length} nhiệm vụ đã được xóa`);
+    } else if (okCount > 0) {
+      toast('Đã xóa', `Đã xóa ${okCount}/${selected.length} nhiệm vụ`);
+    }
     setSelected([]);
     setConfirmDelete(false);
   };
@@ -540,9 +550,9 @@ function MyTaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
     >
       <Checkbox
         checked={isDone}
-        onChange={() => {
-          dispatch({ type: 'TASK_MOVE', id: task.id, status: isDone ? 'todo' : 'done' });
-          toast(isDone ? 'Đã mở lại nhiệm vụ' : 'Hoàn thành nhiệm vụ', task.title);
+        onChange={async () => {
+          const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: isDone ? 'todo' : 'done' });
+          if (ok) toast(isDone ? 'Đã mở lại nhiệm vụ' : 'Hoàn thành nhiệm vụ', task.title);
         }}
       />
       <div className="min-w-0 flex-1">
