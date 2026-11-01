@@ -38,7 +38,7 @@ function wsName(state: ReturnType<typeof useApp>['state'], workspaceId?: string)
 export function AdminShell() {
   const { state } = useApp();
   const me = useCurrentUser();
-  const pending = state.projectRequests.filter((r) => r.status === 'pending').length;
+  const pending = state.projectRequests.filter((r) => r.status === 'pending' && r.type !== 'join_project').length;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -111,7 +111,7 @@ export function AdminShell() {
 export function AdminOverviewPage() {
   const { state } = useApp();
   const navigate = useNavigate();
-  const pending = state.projectRequests.filter((r) => r.status === 'pending');
+  const pending = state.projectRequests.filter((r) => r.status === 'pending' && r.type !== 'join_project');
   const overdue = state.tasks.filter((t) => {
     if (t.status === 'done' || !t.dueDate) return false;
     return new Date(t.dueDate) < new Date(new Date().toDateString());
@@ -197,13 +197,15 @@ export function ApprovalsPage() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Đơn xin tham gia dự án (`join_project`) do Leader duyệt trong tab Hoạt động,
+  // không hiện ở trang Phê duyệt của Admin.
   const pending = useMemo(
-    () => state.projectRequests.filter((r) => r.status === 'pending')
+    () => state.projectRequests.filter((r) => r.status === 'pending' && r.type !== 'join_project')
       .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
     [state.projectRequests],
   );
   const done = useMemo(
-    () => state.projectRequests.filter((r) => r.status !== 'pending')
+    () => state.projectRequests.filter((r) => r.status !== 'pending' && r.type !== 'join_project')
       .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
     [state.projectRequests],
   );

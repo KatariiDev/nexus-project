@@ -1,9 +1,8 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Search, Plus, Bell, Sun, Moon, ChevronRight, LogOut, User as UserIcon, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
+import { Search, Bell, Sun, Moon, ChevronRight, LogOut, User as UserIcon, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
 import { useApp, useCurrentUser } from '../../store/AppContext';
 import { canAccessAdmin } from '../../lib/roles';
 import { Avatar } from '../ui/avatar';
-import { Button } from '../ui/button';
 import { Dropdown, DropdownItem, DropdownSeparator, DropdownLabel } from '../ui/dropdown';
 import { fmtDateTime } from '../../lib/format';
 
@@ -18,7 +17,7 @@ const CRUMBS: Record<string, string> = {
   settings: 'Cài đặt',
 };
 
-export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () => void; onOpenQuickCreate: () => void }) {
+export function Header({ onOpenSearch }: { onOpenSearch: () => void }) {
   const { state, dispatch, signOut } = useApp();
   const user = useCurrentUser();
   const isAdmin = canAccessAdmin(user.role);
@@ -56,10 +55,6 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
         <Search className="h-5 w-5" />
       </button>
 
-      <Button size="sm" onClick={onOpenQuickCreate} className="hidden sm:inline-flex">
-        <Plus className="h-4 w-4" /> Tạo mới
-      </Button>
-
       <Dropdown
         trigger={
           <button className="relative rounded-md p-2 hover:bg-accent text-muted-foreground" aria-label="Thông báo">
@@ -77,7 +72,16 @@ export function Header({ onOpenSearch, onOpenQuickCreate }: { onOpenSearch: () =
         {notifs.map((n) => (
           <button
             key={n.id}
-            onClick={() => { dispatch({ type: 'NOTIF_READ', id: n.id }); if (n.link) navigate(n.link); }}
+            onClick={() => {
+              dispatch({ type: 'NOTIF_READ', id: n.id });
+              if (!n.link) return;
+              // Thông báo xin tham gia dự án: mở thẳng tab Hoạt động của dự án đó.
+              if (n.kind === 'member' && /^\/user\/projects\/[^/?#]+$/.test(n.link)) {
+                navigate(n.link, { state: { tab: 'activity' } });
+              } else {
+                navigate(n.link);
+              }
+            }}
             className="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left hover:bg-accent"
           >
             {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />}

@@ -89,6 +89,11 @@ export function NotificationsPage() {
       }
       return;
     }
+    // Thông báo xin tham gia dự án: tới chi tiết dự án, mở thẳng tab Hoạt động.
+    if (n.kind === 'member' && /^\/user\/projects\/[^/?#]+$/.test(n.link)) {
+      navigate(n.link, { state: { tab: 'activity' } });
+      return;
+    }
     navigate(n.link);
   };
 

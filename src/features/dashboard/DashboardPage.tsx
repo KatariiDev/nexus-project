@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   FolderKanban,
   ListTodo,
-  Plus,
   TrendingUp,
 } from 'lucide-react';
 import { format, isSameDay, subDays } from 'date-fns';
@@ -65,7 +64,7 @@ const AXIS_TICK = { fontSize: 11, fill: 'hsl(var(--muted-foreground))' };
 export function DashboardPage() {
   const { state } = useApp();
   const user = useCurrentUser();
-  const { openTask, setQuickCreateOpen, setQuickCreateTab } = useUI();
+  const { openTask } = useUI();
   const navigate = useNavigate();
 
   // Member chỉ thấy số liệu của các dự án đã tham gia (Admin thấy tất cả).
@@ -188,16 +187,6 @@ export function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{greeting(user.name)}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{todayLong()}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            onClick={() => {
-              setQuickCreateTab('task');
-              setQuickCreateOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" /> Tạo nhanh
-          </Button>
         </div>
       </div>
 

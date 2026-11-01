@@ -228,6 +228,10 @@ function reducer(state: AppState, action: RichAction): AppState {
         projectRequests: [action.request, ...state.projectRequests],
         activityLogs: withLog(state.activityLogs, action.log),
       };
+    case 'PROJECT_JOIN_REQUEST':
+      return action.request
+        ? { ...state, projectRequests: [action.request, ...state.projectRequests] }
+        : state;
     case 'PROJECT_REQUEST_REVIEW': {
       let projects = state.projects;
       if (action.project) {
@@ -703,9 +707,15 @@ function assertProjectPermission(state: AppState, action: Action): void {
   const role = me?.role ?? 'member';
   const isSuperAdmin = me?.isSuperAdmin ?? false;
 
-  // Chỉ Admin (hoặc Admin tổng) được duyệt / từ chối yêu cầu.
+  // Duyệt / từ chối yêu cầu: Admin (hoặc Admin tổng) duyệt mọi loại yêu cầu;
+  // riêng đơn xin tham gia dự án (`join_project`) do Leader của dự án đó duyệt.
   if (action.type === 'PROJECT_REQUEST_REVIEW' && !canReviewProjectRequests(role, isSuperAdmin)) {
-    throw new Error('Chỉ Admin mới được duyệt yêu cầu.');
+    const req = state.projectRequests.find((r) => r.id === action.id);
+    const proj = req?.projectId ? state.projects.find((p) => p.id === req.projectId) : undefined;
+    const isJoinLeader = req?.type === 'join_project' && proj?.managerId === state.currentUserId;
+    if (!isJoinLeader) {
+      throw new Error('Chỉ Admin mới được duyệt yêu cầu.');
+    }
   }
   // Member gửi yêu cầu tạo dự án; yêu cầu tạm dừng/xóa (nếu còn) phải là Leader của dự án đó.
   if (action.type === 'PROJECT_REQUEST_CREATE') {

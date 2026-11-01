@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   addDays,
   addMonths,
@@ -67,7 +67,7 @@ function capitalize(s: string): string {
 export function CalendarPage() {
   const { state } = useApp();
   const me = useCurrentUser();
-  const { openTask, setQuickCreateTab, setQuickCreateOpen } = useUI();
+  const { openTask } = useUI();
   const [view, setView] = useState<View>('month');
   const [cursor, setCursor] = useState<Date>(() => new Date());
   const [projectFilter, setProjectFilter] = useState<string>('all');
@@ -137,11 +137,6 @@ export function CalendarPage() {
         ? `Tuần ${format(weekDays[0], 'dd/MM', { locale: vi })} – ${format(weekDays[6], 'dd/MM/yyyy', { locale: vi })}`
         : capitalize(format(cursor, "EEEE, 'ngày' dd 'tháng' MM 'năm' yyyy", { locale: vi }));
 
-  const openQuickCreateForTask = () => {
-    setQuickCreateTab('task');
-    setQuickCreateOpen(true);
-  };
-
   const renderChip = (ev: DayEvent) => {
     const t = ev.task;
     const p = projectById.get(t.projectId);
@@ -182,9 +177,6 @@ export function CalendarPage() {
                 {today && <Badge tone="primary">Hôm nay</Badge>}
                 <span className="text-xs text-muted-foreground">{events.length} nhiệm vụ</span>
               </div>
-              <Button variant="ghost" size="sm" onClick={openQuickCreateForTask} aria-label="Thêm nhiệm vụ">
-                <Plus className="h-4 w-4" />
-              </Button>
             </div>
             <div className="flex flex-col gap-1 p-2">
               {events.length === 0 && <p className="px-2 py-2 text-sm text-muted-foreground">Không có nhiệm vụ.</p>}
@@ -223,12 +215,6 @@ export function CalendarPage() {
       <PageHeader
         title="Lịch"
         desc="Theo dõi deadline và lịch trình công việc theo thời gian"
-        actions={
-          <Button onClick={openQuickCreateForTask}>
-            <Plus className="h-4 w-4" />
-            Tạo nhiệm vụ
-          </Button>
-        }
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -274,7 +260,6 @@ export function CalendarPage() {
           </Button>
         </div>
         <h2 className="text-center text-base font-semibold sm:text-lg">{title}</h2>
-        <div className="hidden w-40 text-right text-xs text-muted-foreground lg:block">Bấm vào ô ngày để tạo nhiệm vụ nhanh</div>
       </div>
 
       {filteredTasks.length === 0 ? (
@@ -282,11 +267,6 @@ export function CalendarPage() {
           icon={<CalendarDays className="h-6 w-6" />}
           title="Không có nhiệm vụ nào"
           desc="Không tìm thấy nhiệm vụ nào phù hợp với bộ lọc hiện tại."
-          action={
-            <Button onClick={openQuickCreateForTask}>
-              <Plus className="h-4 w-4" /> Tạo nhiệm vụ
-            </Button>
-          }
         />
       ) : view === 'month' ? (
         <div className="overflow-hidden rounded-lg border bg-card shadow-soft">
@@ -305,9 +285,8 @@ export function CalendarPage() {
               return (
                 <div
                   key={day.toISOString()}
-                  onClick={openQuickCreateForTask}
                   className={cn(
-                    'min-h-[92px] cursor-pointer border-b border-r p-1.5 transition-colors hover:bg-accent/50 sm:min-h-[110px]',
+                    'min-h-[92px] border-b border-r p-1.5 transition-colors sm:min-h-[110px]',
                     !inMonth && 'bg-muted/30',
                   )}
                 >

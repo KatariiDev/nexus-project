@@ -44,7 +44,7 @@ import { toast } from '../../components/ui/toast';
 import { dueLabel, fmtDate, isOverdue, timeAgo } from '../../lib/format';
 import { getSupabase } from '../../lib/supabase';
 import { PRIORITIES, PROJECT_STATUSES } from '../../types';
-import type { Priority, Project, ProjectStatus, User } from '../../types';
+import type { Priority, Project, ProjectRequest, ProjectStatus, User } from '../../types';
 import { ProjectForm } from './ProjectForm';
 import { ProjectTaskBoard } from '../tasks/TasksPage';
 import { ProjectDocuments } from '../documents/DocumentsPage';
@@ -90,6 +90,18 @@ export function ProjectsPage() {
   const [formState, setFormState] = useState<{ open: boolean; initial?: Project }>({ open: false });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [joinRequested, setJoinRequested] = useState<string[]>([]);
+
+  /** Id các dự án mình đã gửi đơn xin tham gia đang chờ duyệt (lưu trong DB, không mất khi tải lại trang). */
+  const pendingJoinIds = useMemo(
+    () =>
+      new Set(
+        state.projectRequests
+          .filter((r) => r.type === 'join_project' && r.status === 'pending' && r.requestedBy === me.id)
+          .map((r) => r.projectId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    [state.projectRequests, me.id],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -326,7 +338,7 @@ export function ProjectsPage() {
                 canEdit={perms.canEdit}
                 deleteMode={perms.deleteMode}
                 canJoin={perms.canJoin}
-                joinRequested={joinRequested.includes(p.id)}
+                joinRequested={pendingJoinIds.has(p.id) || joinRequested.includes(p.id)}
                 onJoin={() => requestJoin(p)}
               />
             );
@@ -354,7 +366,7 @@ export function ProjectsPage() {
                   const manager = userById(state.users, p.managerId);
                   const due = dueLabel(p.endDate, p.status === 'completed' ? 'done' : undefined);
                   const perms = permsFor(p);
-                  const joined = joinRequested.includes(p.id);
+                  const joined = pendingJoinIds.has(p.id) || joinRequested.includes(p.id);
                   return (
                     <tr key={p.id} onClick={() => navigate(`/user/projects/${p.id}`)} className="cursor-pointer border-b last:border-0 hover:bg-accent/50">
                       <td className="px-4 py-3">
@@ -752,6 +764,8 @@ export function ProjectDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [joinRequested, setJoinRequested] = useState(false);
+  const [joinReview, setJoinReview] = useState<ProjectRequest | null>(null);
+  const [joinBusy, setJoinBusy] = useState(false);
 
   const project = state.projects.find((p) => p.id === id);
 
@@ -781,6 +795,22 @@ export function ProjectDetailPage() {
   const activities = state.activityLogs
     .filter((a) => a.entityType === 'project' && a.entityId === project.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  /** Đơn xin tham gia đang chờ duyệt của dự án này (người xin chưa phải thành viên). */
+  const joinRequests = useMemo(
+    () =>
+      state.projectRequests
+        .filter(
+          (r) =>
+            r.type === 'join_project' &&
+            r.projectId === project.id &&
+            r.status === 'pending' &&
+            !project.memberIds.includes(r.requestedBy),
+        )
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [state.projectRequests, project.id, project.memberIds],
+  );
+  /** Mình đã gửi đơn xin vào dự án này và đang chờ duyệt (tính từ đơn đã lưu). */
+  const hasPendingJoin = joinRequests.some((r) => r.requestedBy === me.id);
   const archived = project.status === 'archived';
 
   const isLeader = isProjectLeader(project, me.id);
@@ -852,6 +882,25 @@ export function ProjectDetailPage() {
     });
   };
 
+  /** Leader duyệt / từ chối một đơn xin tham gia dự án. */
+  const reviewJoin = (approve: boolean) => {
+    if (!joinReview) return;
+    setJoinBusy(true);
+    const req = joinReview;
+    void dispatch({ type: 'PROJECT_REQUEST_REVIEW', id: req.id, approve })
+      .then(() => {
+        const requester = userById(state.users, req.requestedBy);
+        toast(
+          approve ? 'Đã cho phép tham gia dự án' : 'Đã từ chối yêu cầu tham gia',
+          approve
+            ? `${requester?.name ?? 'Thành viên mới'} đã được thêm vào dự án "${project.name}".`
+            : `Đã từ chối ${requester?.name ?? 'người xin tham gia'} vào dự án "${project.name}".`,
+        );
+        setJoinReview(null);
+      })
+      .finally(() => setJoinBusy(false));
+  };
+
   const stats = [
     { label: 'Tiến độ', value: `${progress}%`, extra: <Progress value={progress} className="mt-2" /> },
     { label: 'Tổng nhiệm vụ', value: String(tasks.length) },
@@ -880,9 +929,9 @@ export function ProjectDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canJoin ? (
-            <Button size="sm" disabled={joinRequested} onClick={requestJoin}>
+            <Button size="sm" disabled={joinRequested || hasPendingJoin} onClick={requestJoin}>
               <UserPlus className="h-4 w-4" />
-              {joinRequested ? 'Đã gửi yêu cầu tham gia' : 'Xin tham gia'}
+              {joinRequested || hasPendingJoin ? 'Đã gửi yêu cầu tham gia' : 'Xin tham gia'}
             </Button>
           ) : (
             <>
@@ -1017,35 +1066,106 @@ export function ProjectDetailPage() {
       {effectiveTab === 'documents' && <ProjectDocuments projectId={project.id} />}
 
       {effectiveTab === 'activity' && (
-        <Card>
-          <CardContent className="flex flex-col divide-y p-0">
-            {activities.length === 0 && (
-              <div className="p-5">
-                <EmptyState icon={<List className="h-6 w-6" />} title="Chưa có hoạt động" desc="Mọi thay đổi trên dự án sẽ được ghi lại tại đây." />
-              </div>
-            )}
-            {activities.map((a) => {
-              const actor = userById(state.users, a.actorId);
-              return (
-                <div key={a.id} className="flex items-start gap-3 p-4">
-                  <Avatar name={actor?.name ?? '?'} avatarUrl={actor?.avatarUrl} size="xs" />
-                  <div className="min-w-0 text-sm">
-                    <p>
-                      <span className="font-medium">{actor?.name ?? 'Ai đó'}</span>{' '}
-                      <span className="text-muted-foreground">{a.action}</span>{' '}
-                      <span className="font-medium">{a.entityName}</span>
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{timeAgo(a.createdAt)}</p>
-                  </div>
+        <div className="flex flex-col gap-4">
+          {isLeader && joinRequests.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Yêu cầu tham gia ({joinRequests.length})</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col divide-y p-0">
+                {joinRequests.map((r) => {
+                  const requester = userById(state.users, r.requestedBy);
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => setJoinReview(r)}
+                      className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-accent/60"
+                    >
+                      <Avatar name={requester?.name ?? '?'} avatarUrl={requester?.avatarUrl} size="sm" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{requester?.name ?? 'Ai đó'}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {requester?.title || requester?.email || 'Thành viên'} · {timeAgo(r.createdAt)}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-primary">Xem & duyệt</span>
+                    </button>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+          <Card>
+            <CardContent className="flex flex-col divide-y p-0">
+              {activities.length === 0 && (
+                <div className="p-5">
+                  <EmptyState icon={<List className="h-6 w-6" />} title="Chưa có hoạt động" desc="Mọi thay đổi trên dự án sẽ được ghi lại tại đây." />
                 </div>
-              );
-            })}
-          </CardContent>
-        </Card>
+              )}
+              {activities.map((a) => {
+                const actor = userById(state.users, a.actorId);
+                return (
+                  <div key={a.id} className="flex items-start gap-3 p-4">
+                    <Avatar name={actor?.name ?? '?'} avatarUrl={actor?.avatarUrl} size="xs" />
+                    <div className="min-w-0 text-sm">
+                      <p>
+                        <span className="font-medium">{actor?.name ?? 'Ai đó'}</span>{' '}
+                        <span className="text-muted-foreground">{a.action}</span>{' '}
+                        <span className="font-medium">{a.entityName}</span>
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{timeAgo(a.createdAt)}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       <ProjectForm open={formOpen} initial={project} onClose={() => setFormOpen(false)} />
       <InviteMembersDialog project={project} open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <Dialog open={joinReview !== null} onClose={() => setJoinReview(null)}>
+        <DialogHeader title="Yêu cầu tham gia dự án" desc={`"${project.name}"`} onClose={() => setJoinReview(null)} />
+        <DialogBody className="flex flex-col gap-4">
+          {joinReview &&
+            (() => {
+              const requester = userById(state.users, joinReview.requestedBy);
+              return (
+                <>
+                  <div className="flex items-center gap-3">
+                    <Avatar name={requester?.name ?? '?'} avatarUrl={requester?.avatarUrl} size="sm" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{requester?.name ?? 'Ai đó'}</p>
+                      <p className="truncate text-xs text-muted-foreground">{requester?.title || 'Thành viên'}</p>
+                    </div>
+                  </div>
+                  <dl className="flex flex-col gap-2 text-sm">
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-muted-foreground">Email</dt>
+                      <dd className="min-w-0 truncate font-medium">{requester?.email ?? '—'}</dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-muted-foreground">Gửi lúc</dt>
+                      <dd className="font-medium">{timeAgo(joinReview.createdAt)}</dd>
+                    </div>
+                  </dl>
+                  <p className="text-sm text-muted-foreground">
+                    Cho phép thì người này được thêm vào dự án ngay. Từ chối thì đơn sẽ biến mất khỏi danh sách chờ.
+                  </p>
+                </>
+              );
+            })()}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" disabled={joinBusy} onClick={() => reviewJoin(false)}>
+            Từ chối
+          </Button>
+          <Button disabled={joinBusy} onClick={() => reviewJoin(true)}>
+            Cho phép
+          </Button>
+        </DialogFooter>
+      </Dialog>
       <ConfirmDialog
         open={confirmDelete}
         title={isAdmin ? 'Xóa dự án?' : 'Gửi yêu cầu xóa dự án?'}
