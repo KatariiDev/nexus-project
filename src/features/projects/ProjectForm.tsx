@@ -117,8 +117,11 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       e.endDate = 'Ngày kết thúc phải từ ngày bắt đầu trở đi';
     }
-    if (form.budget.trim() !== '' && (Number.isNaN(Number(form.budget)) || Number(form.budget) < 0)) {
-      e.budget = 'Ngân sách phải là số không âm';
+    if (form.budget.trim() !== '') {
+      const budget = Number(form.budget);
+      if (Number.isNaN(budget) || budget < 0 || budget > 10000) {
+        e.budget = 'Ngân sách phải là số từ 0 đến 10.000 coin';
+      }
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -224,8 +227,8 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
               ))}
             </Select>
           </Field>
-          <Field label="Ngân sách (VNĐ)" error={errors.budget}>
-            <Input type="number" min={0} value={form.budget} onChange={(e) => set('budget', e.target.value)} placeholder="Để trống nếu không có" />
+          <Field label="Ngân sách yêu cầu (coin)" error={errors.budget}>
+            <Input type="number" min={0} max={10000} value={form.budget} onChange={(e) => set('budget', e.target.value)} placeholder="Để trống nếu không có" />
           </Field>
         </div>
 

@@ -692,7 +692,7 @@ export async function persistAction(
 
     case 'PROJECT_ADD': {
       const { error } = await sb.from('projects').insert(toProjectRow(action.project, ctx.workspaceId));
-      if (error) throwDb(error, 'Không tạo được dự án (mã dự án có thể đã tồn tại).');
+      if (error) throwDb(error, 'Không tạo được dự án.');
       await syncJoin(sb, 'project_members', 'project_id', action.project.id, 'user_id', [], action.project.memberIds);
       const log = buildLog(ctx, 'đã tạo', 'project', action.project.id, action.project.name);
       await insertLog(sb, ctx, log);
@@ -753,6 +753,50 @@ export async function persistAction(
       const title = requestTitle(req, reqProject?.name);
       const now = new Date().toISOString();
       const status = action.approve ? 'approved' : 'rejected';
+
+      // Yêu cầu tạo dự án: tạo dự án TRƯỚC khi đổi trạng thái đơn.
+      // Trước đây đổi trạng thái trước nên tạo lỗi thì đơn kẹt ở "approved"
+      // mà không có dự án, cũng không duyệt lại được (vd: ngân sách vượt
+      // quá giới hạn cột numeric(14,2) của DB).
+      let createdProject: Project | undefined;
+      if (action.approve && req.type === 'create_project') {
+        const p = req.payload as Partial<Project>;
+        // Phòng đơn cũ gửi trước khi form có validate: ngân sách tối đa 10.000 coin.
+        if (typeof p.budget === 'number' && p.budget > 10000) {
+          throw new Error('Ngân sách tối đa 10.000 coin');
+        }
+        const project: Project = {
+          id: newId(),
+          code: String(p.code ?? ''),
+          name: String(p.name ?? 'Dự án mới'),
+          description: String(p.description ?? ''),
+          status: 'planning',
+          priority: (p.priority as Project['priority']) ?? 'medium',
+          startDate: String(p.startDate ?? now.slice(0, 10)),
+          endDate: String(p.endDate ?? now.slice(0, 10)),
+          managerId: String(p.managerId || req.requestedBy || ctx.userId),
+          memberIds: Array.from(
+            new Set([
+              ...(Array.isArray(p.memberIds) ? (p.memberIds as string[]) : []),
+              String(p.managerId || req.requestedBy || ctx.userId),
+              req.requestedBy,
+            ]),
+          ),
+          budget: typeof p.budget === 'number' ? p.budget : undefined,
+          color: String(p.color ?? '#4F46E5'),
+          createdAt: now,
+          updatedAt: now,
+        };
+        const { error: cErr } = await sb.from('projects').insert(toProjectRow(project, ctx.workspaceId));
+        if (cErr) {
+          // Tạo lỗi: đơn vẫn ở "pending" để duyệt lại được, rồi mới báo lỗi.
+          await sb.from('project_requests').update({ status: 'pending' }).eq('id', action.id);
+          throwDb(cErr, 'Không tạo được dự án.');
+        }
+        await syncJoin(sb, 'project_members', 'project_id', project.id, 'user_id', [], project.memberIds);
+        createdProject = project;
+      }
+
       const { error } = await sb
         .from('project_requests')
         .update({ status, reviewed_by: ctx.userId, review_note: action.note ?? null, reviewed_at: now })
@@ -765,35 +809,13 @@ export async function persistAction(
       let deletedProjectId: string | undefined;
       if (action.approve) {
         if (req.type === 'create_project') {
-          const p = req.payload as Partial<Project>;
-          const project: Project = {
-            id: newId(),
-            code: String(p.code ?? ''),
-            name: String(p.name ?? 'Dự án mới'),
-            description: String(p.description ?? ''),
-            status: 'planning',
-            priority: (p.priority as Project['priority']) ?? 'medium',
-            startDate: String(p.startDate ?? now.slice(0, 10)),
-            endDate: String(p.endDate ?? now.slice(0, 10)),
-            managerId: String(p.managerId || req.requestedBy || ctx.userId),
-            memberIds: Array.from(
-              new Set([
-                ...(Array.isArray(p.memberIds) ? (p.memberIds as string[]) : []),
-                String(p.managerId || req.requestedBy || ctx.userId),
-                req.requestedBy,
-              ]),
-            ),
-            budget: typeof p.budget === 'number' ? p.budget : undefined,
-            color: String(p.color ?? '#4F46E5'),
-            createdAt: now,
-            updatedAt: now,
-          };
-          const { error: cErr } = await sb.from('projects').insert(toProjectRow(project, ctx.workspaceId));
-          if (cErr) throwDb(cErr, 'Không tạo được dự án (mã dự án có thể đã tồn tại).');
-          await syncJoin(sb, 'project_members', 'project_id', project.id, 'user_id', [], project.memberIds);
-          reviewedProject = project;
-          executedLog = buildLog(ctx, 'đã duyệt yêu cầu tạo', 'project', project.id, project.name);
-          await insertLog(sb, ctx, executedLog);
+          // Dự án đã được tạo trước khi đổi trạng thái đơn (xem phía trên);
+          // ở đây chỉ ghi log hoạt động.
+          reviewedProject = createdProject;
+          if (reviewedProject) {
+            executedLog = buildLog(ctx, 'đã duyệt yêu cầu tạo', 'project', reviewedProject.id, reviewedProject.name);
+            await insertLog(sb, ctx, executedLog);
+          }
         } else if (req.type === 'pause_project' && req.projectId) {
           const proj = state.projects.find((x) => x.id === req.projectId);
           if (proj) {
