@@ -517,6 +517,8 @@ function requestTitle(
       return `Tạm dừng dự án${name}`;
     case 'delete_project':
       return `Xóa dự án${name}`;
+    case 'join_project':
+      return `Xin tham gia dự án${name}`;
   }
 }
 
@@ -811,6 +813,29 @@ export async function persistAction(
             executedLog = buildLog(ctx, 'đã duyệt yêu cầu xóa', 'project', proj.id, proj.name);
             await insertLog(sb, ctx, executedLog);
           }
+        } else if (req.type === 'join_project' && req.projectId) {
+          // Leader duyệt đơn xin tham gia: thêm người xin vào dự án.
+          const proj = state.projects.find((x) => x.id === req.projectId);
+          if (proj && !proj.memberIds.includes(req.requestedBy)) {
+            const updated = { ...proj, memberIds: [...proj.memberIds, req.requestedBy], updatedAt: now };
+            const { error: uErr } = await sb.from('projects').update(toProjectRow(updated, ctx.workspaceId)).eq('id', proj.id);
+            if (uErr) throwDb(uErr, 'Không thêm được thành viên vào dự án.');
+            await syncJoin(sb, 'project_members', 'project_id', proj.id, 'user_id', proj.memberIds, updated.memberIds);
+            reviewedProject = updated;
+            const requester = state.users.find((u) => u.id === req.requestedBy);
+            executedLog = buildLog(ctx, `đã cho phép ${requester?.name ?? 'thành viên mới'} tham gia`, 'project', proj.id, proj.name);
+            await insertLog(sb, ctx, executedLog);
+          }
+        }
+      }
+
+      // Từ chối đơn xin tham gia: ghi lại vào Hoạt động của dự án.
+      if (!action.approve && req.type === 'join_project' && req.projectId) {
+        const proj = state.projects.find((x) => x.id === req.projectId);
+        if (proj) {
+          const requester = state.users.find((u) => u.id === req.requestedBy);
+          executedLog = buildLog(ctx, `đã từ chối ${requester?.name ?? 'thành viên mới'} tham gia`, 'project', proj.id, proj.name);
+          await insertLog(sb, ctx, executedLog);
         }
       }
 
@@ -1092,16 +1117,43 @@ export async function persistAction(
       if (!project) throwDb(new Error('not found'), 'Không tìm thấy dự án.');
       if (project.managerId === ctx.userId) throw new Error('Bạn đã là Chủ dự án này.');
       if (project.memberIds.includes(ctx.userId)) throw new Error('Bạn đã là thành viên của dự án này.');
+      // Chặn gửi trùng khi đã có đơn xin vào đang chờ duyệt.
+      const dup = state.projectRequests.some(
+        (r) => r.type === 'join_project' && r.projectId === action.projectId && r.requestedBy === ctx.userId && r.status === 'pending',
+      );
+      if (dup) throw new Error('Bạn đã gửi yêu cầu tham gia dự án này rồi.');
+      // Lưu đơn xin vào để Leader duyệt (loại 'join_project' — cần chạy SQL
+      // nexus-join-request-db.sql để DB chấp nhận loại này, xem ghi chú DB).
+      const req: ProjectRequest = {
+        id: newId(),
+        workspaceId: ctx.workspaceId,
+        type: 'join_project',
+        projectId: project.id,
+        payload: {},
+        status: 'pending',
+        requestedBy: ctx.userId,
+        createdAt: new Date().toISOString(),
+      };
+      const { error: rErr } = await sb.from('project_requests').insert({
+        id: req.id,
+        workspace_id: ctx.workspaceId,
+        type: 'join_project',
+        project_id: project.id,
+        payload: {},
+        status: 'pending',
+        requested_by: ctx.userId,
+      });
+      if (rErr) throwDb(rErr, 'Không gửi được yêu cầu tham gia.');
       const { error } = await sb.from('notifications').insert({
         id: newId(),
         user_id: project.managerId,
-        kind: 'project',
+        kind: 'member',
         title: 'Có người xin tham gia dự án',
-        body: `${ctx.userName} xin tham gia dự án "${project.name}". Mở chi tiết dự án để thêm họ vào nhóm.`,
+        body: `${ctx.userName} xin tham gia dự án "${project.name}". Mở chi tiết dự án để duyệt yêu cầu.`,
         link: `/user/projects/${project.id}`,
       });
       if (error) throwDb(error, 'Không gửi được yêu cầu tham gia.');
-      return action;
+      return { ...action, request: req };
     }
 
     default:
