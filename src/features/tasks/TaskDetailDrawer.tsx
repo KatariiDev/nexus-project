@@ -538,6 +538,9 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
       {/* Footer — chỉ Leader/Admin được cập nhật/xóa nhiệm vụ */}
       {canManage && (
         <div className="flex gap-2 border-t p-4">
+          <Button variant="destructive" className="flex-1" onClick={() => setConfirmDelete(true)}>
+            <Trash2 className="h-4 w-4" />Xóa nhiệm vụ
+          </Button>
           <Button
             className="flex-1"
             disabled={!hasPendingEdits}
@@ -546,9 +549,6 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
             onClick={saveAll}
           >
             <Save className="h-4 w-4" />Cập nhật
-          </Button>
-          <Button variant="destructive" className="flex-1" onClick={() => setConfirmDelete(true)}>
-            <Trash2 className="h-4 w-4" />Xóa nhiệm vụ
           </Button>
         </div>
       )}
