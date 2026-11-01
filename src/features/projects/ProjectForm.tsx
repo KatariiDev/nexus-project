@@ -44,15 +44,15 @@ function toInputDate(iso: string): string {
 export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
-  const canDirect = canDirectProjectAction(me.role);
+  const canDirect = canDirectProjectAction(me.role, me.isSuperAdmin);
   const [form, setForm] = useState<FormState | null>(null);
   const [errors, setErrors] = useState<Errors>({});
   const [memberQuery, setMemberQuery] = useState('');
 
   // Chỉ Chủ dự án + Admin được đổi trạng thái (khi sửa); khi tạo mới thì chỉ Admin
-  // tạo trực tiếp mới chọn trạng thái, Leader gửi yêu cầu luôn ở trạng thái "Lập kế hoạch".
+  // tạo trực tiếp mới chọn trạng thái, Member gửi yêu cầu luôn ở trạng thái "Lập kế hoạch".
   const canChangeStatus = initial ? canDirect || initial.managerId === me.id : canDirect;
-  // Leader gửi yêu cầu tạo dự án thì Chủ dự án mặc định là chính mình.
+  // Member gửi yêu cầu tạo dự án thì Chủ dự án mặc định là chính mình.
   const managerLocked = !initial && !canDirect;
 
   useEffect(() => {
@@ -150,7 +150,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
       dispatch({ type: 'PROJECT_ADD', project });
       toast('Đã tạo dự án', `${project.code} · ${project.name}`);
     } else {
-      // Leader: gửi yêu cầu để Admin phê duyệt.
+      // Member: gửi yêu cầu để Admin phê duyệt.
       dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {

@@ -1,16 +1,18 @@
 import type { Project, User, WorkspaceRole } from '../types';
 
 /**
- * Phân quyền Nexus — chỉ còn 3 vai trò: Admin / Leader / Member.
+ * Phân quyền Nexus — chỉ còn 2 vai trò workspace: Admin / Member.
  *
  * - Admin: quản trị toàn hệ thống — duyệt yêu cầu tạo dự án, vào /admin,
  *   gán vai trò workspace cho người khác, xem mọi dự án.
- * - Leader: Chủ dự án — là người yêu cầu tạo dự án lên Admin (khi được duyệt
- *   thì `managerId` của dự án = người yêu cầu). Leader quyết định trạng thái
- *   và duyệt nhiệm vụ của CHÍNH dự án mình làm chủ (`managerId`).
- *   Leader là vai trò theo từng dự án, không phải quyền toàn workspace.
- * - Member: mọi người không phải Admin — chỉ thấy và thao tác trong các dự án
- *   mình đã tham gia (memberIds hoặc là Leader của dự án đó).
+ * - Member: chủ workspace của mình — chỉ thấy và thao tác trong các dự án
+ *   mình đã tham gia (memberIds hoặc là Leader của dự án đó); được gửi yêu
+ *   cầu tạo dự án lên Admin, khi được duyệt thì trở thành Leader (Chủ dự án)
+ *   của dự án đó.
+ *
+ * Leader KHÔNG phải vai trò workspace — đó là chức trong từng dự án:
+ * người tạo dự án (lưu ở `managerId`) là Leader của dự án đó. Leader quyết
+ * định trạng thái và duyệt nhiệm vụ của CHÍNH dự án mình làm chủ.
  */
 
 export const isAdmin = (role: WorkspaceRole): boolean => role === 'admin';
@@ -38,14 +40,15 @@ export const canReviewProjectRequests = (role: WorkspaceRole, isSuperAdmin = fal
   isSuperAdmin || role === 'admin';
 
 /**
- * Được gửi yêu cầu tạo dự án lên Admin (chỉ Leader; Admin làm trực tiếp).
- * Member muốn làm Leader thì Admin cần nâng vai trò workspace của họ lên Leader trước.
+ * Được gửi yêu cầu tạo dự án lên Admin (Member; Admin làm trực tiếp).
+ * Mọi thành viên workspace đều được gửi yêu cầu.
  */
 export const canRequestProjects = (role: WorkspaceRole): boolean =>
-  role === 'leader' || role === 'admin';
+  role === 'member' || role === 'admin';
 
-/** Được tạo dự án trực tiếp, không cần duyệt (chỉ Admin). */
-export const canDirectProjectAction = (role: WorkspaceRole): boolean => role === 'admin';
+/** Được tạo dự án trực tiếp, không cần duyệt (Admin trong workspace, hoặc Admin tổng). */
+export const canDirectProjectAction = (role: WorkspaceRole, isSuperAdmin = false): boolean =>
+  isSuperAdmin || role === 'admin';
 
 /** Được vào khu vực /admin/* (Admin trong workspace, hoặc Admin tổng toàn hệ thống). */
 export const canAccessAdmin = (role: WorkspaceRole, isSuperAdmin = false): boolean =>
@@ -77,6 +80,6 @@ export const canManageMembers = (role: WorkspaceRole): boolean => role === 'admi
 
 /** Các vai trò mà một người được phép gán cho người khác (chỉ Admin gán). */
 export function assignableRoles(role: WorkspaceRole): WorkspaceRole[] {
-  if (role === 'admin') return ['admin', 'leader', 'member'];
+  if (role === 'admin') return ['admin', 'member'];
   return [];
 }

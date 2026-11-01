@@ -40,7 +40,7 @@ export function createMockWorkspaceBundle(userName = 'Dev Admin', userEmail = 'd
       name: 'Nguyá»n VÄn Minh',
       email: 'minh.nguyen@nexus.internal',
       title: 'Frontend Engineer',
-      role: 'leader',
+      role: 'member',
       status: 'active',
       workload: 80,
       isSuperAdmin: false,

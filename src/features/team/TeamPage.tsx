@@ -20,7 +20,6 @@ type RoleTone = 'purple' | 'primary' | 'info' | 'muted';
 
 const roleTone: Record<WorkspaceRole, RoleTone> = {
   admin: 'primary',
-  leader: 'info',
   member: 'muted',
 };
 
