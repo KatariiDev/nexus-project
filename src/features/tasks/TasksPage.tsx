@@ -64,6 +64,12 @@ function TaskCardContent({ task, dragHandle }: { task: Task; dragHandle?: ReactN
         {dragHandle}
       </div>
       <p className="line-clamp-2 mt-1 text-sm font-medium leading-snug">{task.title}</p>
+      {task.declinedBy && (
+        <p className="mt-1.5 flex items-center gap-1.5 text-xs text-destructive">
+          <Badge tone="destructive">Đã từ chối</Badge>
+          {task.declinedReason && <span className="min-w-0 truncate">{task.declinedReason}</span>}
+        </p>
+      )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <PriorityBadge priority={task.priority} />
         <span className={cn('inline-flex items-center gap-1 text-xs', dueToneClass[due.tone])}>
@@ -370,8 +376,14 @@ function TaskTable({ tasks, onOpenTask, canManage }: { tasks: Task[]; onOpenTask
                     </td>
                   )}
                   <td className="p-3">
-                    <p className="font-medium">{t.title}</p>
+                    <p className="flex flex-wrap items-center gap-2 font-medium">
+                      {t.title}
+                      {t.declinedBy && <Badge tone="destructive">Đã từ chối</Badge>}
+                    </p>
                     <p className="font-mono text-xs text-muted-foreground">{t.code}</p>
+                    {t.declinedBy && t.declinedReason && (
+                      <p className="text-xs text-destructive">Lý do: {t.declinedReason}</p>
+                    )}
                   </td>
                   <td className="p-3 text-muted-foreground">{project?.name ?? '—'}</td>
                   <td className="p-3">
