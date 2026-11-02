@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Search, Bell, Sun, Moon, ChevronRight, LogOut, User as UserIcon, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
+import { Search, Bell, Sun, Moon, ChevronRight, LogOut, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
 import { useApp, useCurrentUser } from '../../store/AppContext';
 import { canAccessAdmin } from '../../lib/roles';
 import { Avatar } from '../ui/avatar';
@@ -152,7 +152,6 @@ export function Header({ onOpenSearch }: { onOpenSearch: () => void }) {
             <DropdownSeparator />
           </>
         )}
-        <DropdownItem icon={<UserIcon className="h-4 w-4" />} label="Hồ sơ cá nhân" onClick={() => navigate('/user/settings')} />
         <DropdownItem icon={<SettingsIcon className="h-4 w-4" />} label="Cài đặt" onClick={() => navigate('/user/settings')} />
         <DropdownSeparator />
         <DropdownItem
