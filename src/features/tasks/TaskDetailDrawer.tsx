@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CalendarDays, Eye, FileText, Flag, History, Link2, ListChecks,
-  MessageSquare, Paperclip, Save, Send, Tag, Timer, Trash2, Users, X,
+  MessageSquare, Paperclip, Save, Send, Tag, Timer, Trash2, Users, X, XCircle,
 } from 'lucide-react';
 import { projectById, taskById, useApp, useCurrentUser, userById } from '../../store/AppContext';
 import type { Priority, Task, TaskStatus, User } from '../../types';
@@ -16,7 +16,7 @@ import { Checkbox } from '../../components/ui/controls';
 import { Progress } from '../../components/ui/progress';
 import { ConfirmDialog } from '../../components/ui/feedback';
 import { toast } from '../../components/ui/toast';
-import { dueLabel, fmtDate, timeAgo } from '../../lib/format';
+import { dueLabel, fmtDate, fmtDateTime, timeAgo } from '../../lib/format';
 import { cn, newId } from '../../lib/utils';
 import { canManageTaskForProject } from '../../lib/roles';
 import { dateInputToISO, isoToDateInput } from './helpers';
@@ -134,6 +134,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
   );
   const due = dueLabel(task.dueDate, task.status);
   const creatorName = userById(state.users, task.creatorId)?.name ?? '—';
+  const declinerName = task.declinedBy ? userById(state.users, task.declinedBy)?.name ?? '—' : null;
 
   const saveTitle = () => {
     const t = title.trim();
@@ -252,6 +253,24 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
           {due.text}
         </span>
       </div>
+
+      {/* Thông tin từ chối nhận (nếu có) */}
+      {task.declinedBy && (
+        <div className="border-b border-destructive/30 bg-destructive/5 p-4">
+          <p className="flex items-center gap-2 text-sm font-medium text-destructive">
+            <XCircle className="h-4 w-4" />
+            Đã từ chối nhận nhiệm vụ
+          </p>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            {declinerName}
+            {task.declinedAt ? ` · ${fmtDateTime(task.declinedAt)}` : ''}
+          </p>
+          {task.declinedReason && <p className="mt-1 text-sm">Lý do: {task.declinedReason}</p>}
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Leader có thể dời deadline hoặc đổi người thực hiện ở mục Thông tin bên dưới.
+          </p>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {/* Thông tin */}

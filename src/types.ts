@@ -63,6 +63,14 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  /** Thời điểm giao gần nhất — đồng hồ 12h tự động nhận tính từ đây. */
+  assignedAt?: string;
+  /** Người đã từ chối nhận task (nếu có). */
+  declinedBy?: string | null;
+  /** Lý do từ chối nhận task. */
+  declinedReason?: string | null;
+  /** Thời điểm từ chối nhận task. */
+  declinedAt?: string | null;
 }
 
 export interface ChecklistItem {
@@ -104,7 +112,7 @@ export interface TaskAttachment {
 export interface Notification {
   id: string;
   userId: string;
-  kind: 'assigned' | 'due_soon' | 'overdue' | 'comment' | 'project' | 'member' | 'review';
+  kind: 'assigned' | 'due_soon' | 'overdue' | 'comment' | 'project' | 'member' | 'review' | 'declined';
   title: string;
   body: string;
   link?: string;

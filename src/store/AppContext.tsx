@@ -93,6 +93,8 @@ export type Action =
   | { type: 'TASK_UPDATE'; task: Task }
   | { type: 'TASK_DELETE'; id: string }
   | { type: 'TASK_MOVE'; id: string; status: Task['status'] }
+  | { type: 'TASK_DECLINE'; id: string; reason: string }
+  | { type: 'TASK_AUTO_ACCEPT'; id: string }
   | { type: 'CHECKLIST_TOGGLE'; id: string }
   | { type: 'CHECKLIST_ADD'; id: string; taskId: string; title: string }
   | { type: 'CHECKLIST_DELETE'; id: string }
@@ -280,6 +282,40 @@ function reducer(state: AppState, action: RichAction): AppState {
         status: action.status,
         updatedAt: new Date().toISOString(),
         completedAt: action.status === 'done' ? new Date().toISOString() : undefined,
+        // Task rời khỏi 'todo': từ chối không còn ý nghĩa.
+        ...(action.status !== 'todo'
+          ? { declinedBy: undefined, declinedReason: undefined, declinedAt: undefined }
+          : {}),
+      };
+      return {
+        ...state,
+        tasks: state.tasks.map((t) => (t.id === action.id ? updated : t)),
+        activityLogs: withLog(state.activityLogs, action.log),
+      };
+    }
+    case 'TASK_DECLINE': {
+      const now = new Date().toISOString();
+      return {
+        ...state,
+        tasks: state.tasks.map((t) =>
+          t.id === action.id
+            ? { ...t, declinedBy: state.currentUserId, declinedReason: action.reason, declinedAt: now, updatedAt: now }
+            : t,
+        ),
+        activityLogs: withLog(state.activityLogs, action.log),
+      };
+    }
+    case 'TASK_AUTO_ACCEPT': {
+      const task = state.tasks.find((t) => t.id === action.id);
+      if (!task) return state;
+      const updated: Task = {
+        ...task,
+        status: 'in_progress',
+        updatedAt: new Date().toISOString(),
+        completedAt: undefined,
+        declinedBy: undefined,
+        declinedReason: undefined,
+        declinedAt: undefined,
       };
       return {
         ...state,
@@ -354,6 +390,36 @@ interface AppContextValue {
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
+
+/** Sau 12h kể từ lúc giao mà không phản hồi thì mặc định task được thực hiện. */
+export const AUTO_ACCEPT_MS = 12 * 60 * 60 * 1000;
+
+/** Task đang chờ phản hồi đã quá 12h kể từ lúc giao. */
+export function findAutoAcceptTasks(tasks: Task[], now = Date.now()): Task[] {
+  return tasks.filter(
+    (t) =>
+      t.status === 'todo' &&
+      t.assignedAt &&
+      !t.declinedBy &&
+      t.assigneeIds.length > 0 &&
+      now - new Date(t.assignedAt).getTime() > AUTO_ACCEPT_MS,
+  );
+}
+
+/**
+ * Chạy kiểm tra tự động nhận. Lũy đẳng: task đã sang 'in_progress' thì lần
+ * sau không khớp nữa. Dừng ở lỗi đầu tiên để không spam toast.
+ */
+export async function runAutoAcceptCheck(
+  tasks: Task[],
+  dispatch: (a: Action) => Promise<boolean>,
+): Promise<void> {
+  const overdue = findAutoAcceptTasks(tasks);
+  for (const t of overdue) {
+    const ok = await dispatch({ type: 'TASK_AUTO_ACCEPT', id: t.id });
+    if (!ok) break;
+  }
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, baseDispatch] = useReducer(reducer, undefined, emptyState);
@@ -693,6 +759,9 @@ function assertProjectMembership(state: AppState, action: Action): void {
   } else if (action.type === 'TASK_MOVE' || action.type === 'TASK_DELETE') {
     const task = state.tasks.find((t) => t.id === action.id);
     targetProjectId = task?.projectId;
+  } else if (action.type === 'TASK_DECLINE') {
+    const task = state.tasks.find((t) => t.id === action.id);
+    targetProjectId = task?.projectId;
   } else if (action.type === 'TASK_UPDATE') {
     targetProjectId = action.task.projectId;
   } else if (action.type === 'DEPENDENCY_ADD') {
@@ -761,6 +830,14 @@ function assertProjectMembership(state: AppState, action: Action): void {
     const task = state.tasks.find((t) => t.id === action.id);
     if (task && !task.assigneeIds.includes(state.currentUserId)) {
       throw new Error('Chỉ Chủ dự án hoặc Admin mới được đổi trạng thái nhiệm vụ của người khác.');
+    }
+  }
+
+  // Từ chối nhận: chỉ người được giao nhiệm vụ đó mới được từ chối.
+  if (action.type === 'TASK_DECLINE' && !isLeader) {
+    const task = state.tasks.find((t) => t.id === action.id);
+    if (!task || !task.assigneeIds.includes(state.currentUserId)) {
+      throw new Error('Chỉ người được giao nhiệm vụ mới được từ chối.');
     }
   }
 
@@ -855,6 +932,13 @@ function assertMemberPermission(state: AppState, action: Action): void {
       return false;
     }
   }, []);
+
+  // Tự động nhận task sau 12h không phản hồi — chạy khi dữ liệu thay đổi
+  // (tải xong, realtime cập nhật, hoặc chính lần tự nhận trước đó đổi trạng thái).
+  useEffect(() => {
+    if (state.tasks.length === 0) return;
+    void runAutoAcceptCheck(state.tasks, dispatch);
+  }, [state.tasks, dispatch]);
 
   const signOut = useCallback(async () => {
     try {
