@@ -41,7 +41,7 @@ export function AdminShell() {
   const pending = state.projectRequests.filter((r) => r.status === 'pending' && r.type !== 'join_project').length;
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-screen overflow-hidden bg-background">
       {/* Aside trái */}
       <aside className="flex h-screen w-60 shrink-0 flex-col border-r bg-card">
         <div className="flex h-16 items-center gap-2.5 border-b px-4">
