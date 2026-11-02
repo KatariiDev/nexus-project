@@ -503,9 +503,9 @@ function ProjectCard({
   return (
     <Card
       onClick={() => navigate(`/user/projects/${project.id}`)}
-      className="cursor-pointer overflow-hidden transition-shadow hover:shadow-lift"
+      className="cursor-pointer transition-shadow hover:shadow-lift"
     >
-      <div className="h-1.5" style={{ backgroundColor: project.color }} />
+      <div className="h-1.5 rounded-t-lg" style={{ backgroundColor: project.color }} />
       <CardContent className="flex flex-col gap-3 p-5 pt-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">

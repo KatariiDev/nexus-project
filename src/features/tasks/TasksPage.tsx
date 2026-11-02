@@ -541,9 +541,15 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
 
 function MyTaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const { state, dispatch } = useApp();
+  const me = useCurrentUser();
   const project = projectById(state.projects, task.projectId);
   const due = dueLabel(task.dueDate, task.status);
   const isDone = task.status === 'done';
+  const isPendingReview = task.status === 'in_review';
+  // Leader/Admin được hoàn thành trực tiếp; thành viên tick thì gửi chờ duyệt
+  // (guard chỉ chặn chuyển ra khỏi "Chờ duyệt", nên tick thẳng sang "done"
+  // trước đây đã bỏ qua bước duyệt).
+  const canCompleteDirectly = !!project && canManageTaskForProject(project, me);
 
   return (
     <div
@@ -551,10 +557,19 @@ function MyTaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
       className="flex cursor-pointer items-center gap-3 rounded-lg border bg-card p-3 shadow-soft transition-shadow hover:shadow-lift"
     >
       <Checkbox
-        checked={isDone}
+        checked={isDone || isPendingReview}
+        indeterminate={isPendingReview}
+        disabled={isPendingReview}
         onChange={async () => {
-          const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: isDone ? 'todo' : 'done' });
-          if (ok) toast(isDone ? 'Đã mở lại nhiệm vụ' : 'Hoàn thành nhiệm vụ', task.title);
+          if (isPendingReview) return;
+          if (isDone) {
+            const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: 'todo' });
+            if (ok) toast('Đã mở lại nhiệm vụ', task.title);
+            return;
+          }
+          const next = canCompleteDirectly ? 'done' : 'in_review';
+          const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: next });
+          if (ok) toast(canCompleteDirectly ? 'Hoàn thành nhiệm vụ' : 'Đã gửi chờ duyệt', task.title);
         }}
       />
       <div className="min-w-0 flex-1">
@@ -563,6 +578,7 @@ function MyTaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
           <span className="font-mono">{task.code}</span>
           <span>{project?.name ?? '—'}</span>
           <PriorityBadge priority={task.priority} />
+          {isPendingReview && <TaskStatusBadge status="in_review" />}
         </p>
       </div>
       <span className={cn('shrink-0 text-xs', dueToneClass[due.tone])}>{due.text}</span>
