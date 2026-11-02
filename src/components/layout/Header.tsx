@@ -63,6 +63,7 @@ export function Header({ onOpenSearch }: { onOpenSearch: () => void }) {
       </button>
 
       <Dropdown
+        panelClassName="w-[380px] max-w-[calc(100vw-2rem)]"
         trigger={
           <button className="relative rounded-md p-2 hover:bg-accent text-muted-foreground" aria-label="Thông báo">
             <Bell className="h-5 w-5" />

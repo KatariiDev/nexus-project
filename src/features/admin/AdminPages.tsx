@@ -14,11 +14,11 @@ import { Dialog, DialogHeader, DialogBody, DialogFooter } from '../../components
 import { Tabs } from '../../components/ui/tabs';
 import { Avatar } from '../../components/ui/avatar';
 import { toast } from '../../components/ui/toast';
-import { timeAgo } from '../../lib/format';
+import { fmtDate, fmtDateTime, timeAgo } from '../../lib/format';
 import { cn } from '../../lib/utils';
 import { canAccessAdmin } from '../../lib/roles';
 import type { ProjectRequest, ProjectRequestStatus } from '../../types';
-import { projectRequestTypeLabel } from '../../types';
+import { priorityLabel, projectRequestTypeLabel, projectStatusLabel } from '../../types';
 
 const ADMIN_NAV = [
   { to: '/admin/overview', label: 'Tổng quan', icon: LayoutDashboard, end: true },
@@ -196,6 +196,8 @@ export function ApprovalsPage() {
   const [rejectTarget, setRejectTarget] = useState<ProjectRequest | null>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  // Yêu cầu đang xem chi tiết (bấm vào box) — xem xong mới Duyệt/Từ chối.
+  const [selected, setSelected] = useState<ProjectRequest | null>(null);
 
   // Đơn xin tham gia dự án (`join_project`) do Leader duyệt trong tab Hoạt động,
   // không hiện ở trang Phê duyệt của Admin.
@@ -209,6 +211,15 @@ export function ApprovalsPage() {
       .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
     [state.projectRequests],
   );
+
+  // Dự án + nhiệm vụ của yêu cầu đang xem chi tiết (dùng cho dialog chi tiết).
+  const selProject = selected?.projectId
+    ? state.projects.find((x) => x.id === selected.projectId)
+    : undefined;
+  const selTasks = selProject ? state.tasks.filter((t) => t.projectId === selProject.id) : [];
+  const selMemberNames = (selected?.payload?.memberIds ?? [])
+    .map((id) => userName(state, id))
+    .filter((n) => n !== '—');
 
   const approve = (r: ProjectRequest) => {
     setBusy(true);
@@ -235,7 +246,7 @@ export function ApprovalsPage() {
   const renderCard = (r: ProjectRequest) => {
     const p = r.projectId ? state.projects.find((x) => x.id === r.projectId) : undefined;
     return (
-      <Card key={r.id}>
+      <Card key={r.id} className="cursor-pointer transition-shadow hover:shadow-lift" onClick={() => setSelected(r)}>
         <CardContent className="flex flex-col gap-3 p-5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="primary">{projectRequestTypeLabel(r.type)}</Badge>
@@ -271,7 +282,7 @@ export function ApprovalsPage() {
             </div>
           )}
           {r.status === 'pending' && (
-            <div className="flex gap-2">
+            <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
               <Button size="sm" onClick={() => approve(r)} disabled={busy}>
                 <CheckCircle2 className="h-4 w-4" /> Duyệt
               </Button>
@@ -322,6 +333,166 @@ export function ApprovalsPage() {
             {busy ? 'Đang xử lý...' : 'Xác nhận từ chối'}
           </Button>
         </DialogFooter>
+      </Dialog>
+
+      {/* Dialog xem chi tiết yêu cầu trước khi phê duyệt */}
+      <Dialog open={!!selected} onClose={() => setSelected(null)} wide>
+        {selected && (
+          <>
+            <DialogHeader
+              title={requestName(selected, state)}
+              desc={`${projectRequestTypeLabel(selected.type)} · ${statusLabel[selected.status]}`}
+              onClose={() => setSelected(null)}
+            />
+            <DialogBody>
+              <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Người yêu cầu</dt>
+                  <dd className="mt-1 flex items-center gap-2 text-sm font-medium">
+                    <Avatar
+                      name={userName(state, selected.requestedBy)}
+                      avatarUrl={state.users.find((u) => u.id === selected.requestedBy)?.avatarUrl}
+                      size="sm"
+                    />
+                    {userName(state, selected.requestedBy)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Thời gian gửi</dt>
+                  <dd className="mt-1 text-sm font-medium">{fmtDateTime(selected.createdAt)}</dd>
+                </div>
+                {wsName(state, selected.workspaceId) && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Workspace</dt>
+                    <dd className="mt-1 text-sm font-medium">{wsName(state, selected.workspaceId)}</dd>
+                  </div>
+                )}
+                {selected.type === 'create_project' && (
+                  <>
+                    {selected.payload.code && (
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Mã dự án</dt>
+                        <dd className="mt-1 font-mono text-sm font-medium">{selected.payload.code}</dd>
+                      </div>
+                    )}
+                    {selected.payload.priority && (
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Mức ưu tiên</dt>
+                        <dd className="mt-1 text-sm font-medium">{priorityLabel(selected.payload.priority)}</dd>
+                      </div>
+                    )}
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Ngân sách</dt>
+                      <dd className="mt-1 text-sm font-medium">
+                        {selected.payload.budget != null
+                          ? `${Number(selected.payload.budget).toLocaleString('vi-VN')} coin`
+                          : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Ngày bắt đầu</dt>
+                      <dd className="mt-1 text-sm font-medium">{fmtDate(selected.payload.startDate)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Ngày kết thúc</dt>
+                      <dd className="mt-1 text-sm font-medium">{fmtDate(selected.payload.endDate)}</dd>
+                    </div>
+                    {selected.payload.managerId && (
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Chủ dự án</dt>
+                        <dd className="mt-1 text-sm font-medium">{userName(state, selected.payload.managerId)}</dd>
+                      </div>
+                    )}
+                    <div className="sm:col-span-2">
+                      <dt className="text-xs text-muted-foreground">Thành viên ({selMemberNames.length})</dt>
+                      <dd className="mt-1 text-sm font-medium">
+                        {selMemberNames.length > 0 ? selMemberNames.join(', ') : '—'}
+                      </dd>
+                    </div>
+                    {selected.payload.description && (
+                      <div className="sm:col-span-2">
+                        <dt className="text-xs text-muted-foreground">Mô tả</dt>
+                        <dd className="mt-1 whitespace-pre-wrap text-sm">{selected.payload.description}</dd>
+                      </div>
+                    )}
+                  </>
+                )}
+                {selected.type !== 'create_project' && selProject && (
+                  <>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Mã dự án</dt>
+                      <dd className="mt-1 font-mono text-sm font-medium">{selProject.code}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Trạng thái hiện tại</dt>
+                      <dd className="mt-1 text-sm font-medium">{projectStatusLabel(selProject.status)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Chủ dự án</dt>
+                      <dd className="mt-1 text-sm font-medium">{userName(state, selProject.managerId)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Thành viên</dt>
+                      <dd className="mt-1 text-sm font-medium">{selProject.memberIds.length} người</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Nhiệm vụ</dt>
+                      <dd className="mt-1 text-sm font-medium">
+                        {selTasks.length} nhiệm vụ ({selTasks.filter((t) => t.status === 'done').length} hoàn thành)
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Ngân sách</dt>
+                      <dd className="mt-1 text-sm font-medium">
+                        {selProject.budget != null
+                          ? `${Number(selProject.budget).toLocaleString('vi-VN')} coin`
+                          : '—'}
+                      </dd>
+                    </div>
+                  </>
+                )}
+              </dl>
+              {selected.status !== 'pending' && (
+                <div className="mt-4 rounded-lg bg-muted p-3 text-sm">
+                  <p>
+                    {selected.status === 'approved' ? 'Đã duyệt' : 'Đã từ chối'} bởi{' '}
+                    <b>{userName(state, selected.reviewedBy)}</b>
+                    {selected.reviewedAt ? ` · ${timeAgo(selected.reviewedAt)}` : ''}
+                  </p>
+                  {selected.reviewNote ? <p className="mt-1 text-muted-foreground">Lý do: {selected.reviewNote}</p> : null}
+                </div>
+              )}
+            </DialogBody>
+            <DialogFooter>
+              {selected.status === 'pending' ? (
+                <>
+                  <Button variant="outline" onClick={() => setSelected(null)}>Đóng</Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const r = selected;
+                      setSelected(null);
+                      setRejectTarget(r);
+                    }}
+                  >
+                    <XCircle className="h-4 w-4" /> Từ chối
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      approve(selected);
+                      setSelected(null);
+                    }}
+                    disabled={busy}
+                  >
+                    <CheckCircle2 className="h-4 w-4" /> Duyệt
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" onClick={() => setSelected(null)}>Đóng</Button>
+              )}
+            </DialogFooter>
+          </>
+        )}
       </Dialog>
     </div>
   );

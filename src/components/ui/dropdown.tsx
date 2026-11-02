@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/utils';
 
-export function Dropdown({ trigger, children, align = 'right', className }: {
+export function Dropdown({ trigger, children, align = 'right', className, panelClassName }: {
   trigger: React.ReactNode;
   children: React.ReactNode;
   align?: 'left' | 'right';
   className?: string;
+  panelClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -32,6 +33,7 @@ export function Dropdown({ trigger, children, align = 'right', className }: {
           className={cn(
             'absolute z-50 mt-2 min-w-[200px] rounded-lg border bg-popover p-1.5 shadow-lift animate-fade-in',
             align === 'right' ? 'right-0' : 'left-0',
+            panelClassName,
           )}
           onClick={() => setOpen(false)}
         >
