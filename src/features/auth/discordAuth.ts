@@ -1,8 +1,8 @@
 import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 
-export const TARGET_DISCORD_GUILD_ID = import.meta.env.VITE_DISCORD_GUILD_ID as string | undefined;
+const TARGET_DISCORD_GUILD_ID = import.meta.env.VITE_DISCORD_GUILD_ID as string | undefined;
 
-export interface DiscordAuthResult {
+interface DiscordAuthResult {
   success: boolean;
   error?: string;
 }
@@ -160,7 +160,7 @@ export async function verifyDiscordGuildMembership(providerToken?: string | null
   return inFlightVerification;
 }
 
-export interface DiscordGuildMember {
+interface DiscordGuildMember {
   nick?: string | null;
   avatar?: string | null;
   user?: {
@@ -223,7 +223,7 @@ let inFlightMemberFetch: Promise<DiscordGuildMember | null> | null = null;
  * Lấy thông tin thành viên (nickname, avatar riêng) của user trong Discord Server nội bộ (BCN).
  * Yêu cầu quyền scope: guilds.members.read
  */
-export async function fetchDiscordGuildMember(
+async function fetchDiscordGuildMember(
   providerToken?: string | null,
   targetGuildId?: string,
 ): Promise<DiscordGuildMember | null> {
@@ -438,7 +438,7 @@ export function getDiscordDisplayName(
  * 1. Server Avatar riêng trong server BCN (nếu người dùng có cài đặt)
  * 2. Global Avatar trên Discord
  */
-export function getDiscordAvatarUrl(
+function getDiscordAvatarUrl(
   user: {
     user_metadata?: Record<string, unknown>;
     identities?: Array<{ provider: string; id?: string; identity_data?: Record<string, unknown> }>;
@@ -524,7 +524,7 @@ export function getDiscordAvatarUrl(
   return undefined;
 }
 
-export interface DiscordCurrentUser {
+interface DiscordCurrentUser {
   id: string;
   username: string;
   global_name?: string | null;
@@ -537,7 +537,7 @@ let inFlightCurrentUserFetch: Promise<DiscordCurrentUser | null> | null = null;
 /**
  * Lấy thông tin user Discord từ endpoint /users/@me (chỉ cần scope 'identify').
  */
-export async function fetchDiscordCurrentUser(providerToken?: string | null): Promise<DiscordCurrentUser | null> {
+async function fetchDiscordCurrentUser(providerToken?: string | null): Promise<DiscordCurrentUser | null> {
   if (!providerToken) {
     if (typeof sessionStorage !== 'undefined') {
       try {
@@ -607,7 +607,7 @@ export async function fetchDiscordCurrentUser(providerToken?: string | null): Pr
 /**
  * Lấy username Discord (handle định danh duy nhất, ví dụ: '_trantuongvan', 'hoangnam').
  */
-export function getDiscordUsername(
+function getDiscordUsername(
   user: {
     email?: string;
     user_metadata?: Record<string, unknown>;

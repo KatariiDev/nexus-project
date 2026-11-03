@@ -23,8 +23,3 @@ export function getSupabase(): SupabaseClient {
   }
   return client;
 }
-
-/** Client dùng cho các thao tác cần kiểm tra null an toàn (hiếm khi dùng). */
-export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(url as string, anonKey as string)
-  : null;

@@ -1,7 +1,7 @@
 import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 import { signInWithDiscordOAuth, verifyDiscordGuildMembership } from './discordAuth';
 
-export interface AuthResult {
+interface AuthResult {
   success: boolean;
   error?: string;
   isDev?: boolean;

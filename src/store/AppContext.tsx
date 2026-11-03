@@ -411,10 +411,10 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 /** Sau 12h kể từ lúc giao mà không phản hồi thì mặc định task được thực hiện. */
-export const AUTO_ACCEPT_MS = 12 * 60 * 60 * 1000;
+const AUTO_ACCEPT_MS = 12 * 60 * 60 * 1000;
 
 /** Task đang chờ phản hồi đã quá 12h kể từ lúc giao. */
-export function findAutoAcceptTasks(tasks: Task[], now = Date.now()): Task[] {
+function findAutoAcceptTasks(tasks: Task[], now = Date.now()): Task[] {
   return tasks.filter(
     (t) =>
       t.status === 'todo' &&

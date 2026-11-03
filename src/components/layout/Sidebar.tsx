@@ -9,7 +9,7 @@ import { useApp, useCurrentUser } from '../../store/AppContext';
 import { canAccessAdmin } from '../../lib/roles';
 import { Avatar } from '../ui/avatar';
 
-export const NAV_ITEMS = [
+const NAV_ITEMS = [
   { to: '/user', label: 'Tổng quan', icon: LayoutDashboard, end: true },
   { to: '/user/projects', label: 'Dự án', icon: Briefcase },
   { to: '/user/my-tasks', label: 'Công việc của tôi', icon: ListChecks },

@@ -123,7 +123,7 @@ export interface Notification {
 }
 
 /** Yêu cầu phê duyệt liên quan đến dự án (Member gửi → Admin duyệt; riêng `join_project` do Leader của dự án duyệt). */
-export type ProjectRequestType = 'create_project' | 'pause_project' | 'delete_project' | 'join_project' | 'invite_member';
+type ProjectRequestType = 'create_project' | 'pause_project' | 'delete_project' | 'join_project' | 'invite_member';
 export type ProjectRequestStatus = 'pending' | 'approved' | 'rejected';
 
 /** Payload của lời mời vào dự án (chỉ dùng với invite_member). */
@@ -149,7 +149,7 @@ export interface ProjectRequest {
   reviewedAt?: string;
 }
 
-export const PROJECT_REQUEST_TYPES: { value: ProjectRequestType; label: string }[] = [
+const PROJECT_REQUEST_TYPES: { value: ProjectRequestType; label: string }[] = [
   { value: 'create_project', label: 'Tạo dự án' },
   { value: 'pause_project', label: 'Tạm dừng dự án' },
   { value: 'delete_project', label: 'Xóa dự án' },

@@ -130,7 +130,7 @@ function mapUser(p: DbProfile, role: string): User {
  * CHECK constraint chưa được migrate — các giá trị cũ đều về 'member'
  * (fail closed: không tự nâng quyền cho ai) cho tới khi user migrate DB.
  */
-export function normalizeRole(role: string): WorkspaceRole {
+function normalizeRole(role: string): WorkspaceRole {
   if (role === 'admin' || role === 'member') return role;
   return 'member';
 }
@@ -184,7 +184,7 @@ function mapTask(r: DbTask, assigneeIds: string[], watcherIds: string[], labelId
 
 /* ================= Tải dữ liệu ================= */
 
-export interface Membership {
+interface Membership {
   workspaceId: string;
   role: WorkspaceRole;
 }
@@ -414,7 +414,7 @@ function formatBytes(b: number): string {
 /* ================= Tài liệu dự án: upload file (bucket project-documents) ================= */
 
 /** Bucket private chứa tệp tài liệu của dự án (tạo bằng nexus-part1-db.sql). */
-export const PROJECT_DOCS_BUCKET = 'project-documents';
+const PROJECT_DOCS_BUCKET = 'project-documents';
 
 /** Loại tệp cho phép kéo-thả vào tab Tài liệu của dự án. */
 export const PROJECT_DOC_ACCEPT = [
@@ -437,7 +437,7 @@ function sanitizeFileName(name: string): string {
     .slice(0, 120) || 'file';
 }
 
-export interface UploadedProjectDoc {
+interface UploadedProjectDoc {
   /** Đường dẫn trong bucket — lưu vào documents.file_url. */
   path: string;
   name: string;
