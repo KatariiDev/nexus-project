@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { DndContext, DragOverlay, useDraggable, useDroppable } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
@@ -6,14 +6,15 @@ import {
   AlertTriangle, ArrowDown, ArrowUp, CalendarDays, CheckCheck, ChevronsUpDown,
   Clock, GripVertical, Inbox, Plus, Search, SquareKanban, Table as TableIcon, Trash2,
 } from 'lucide-react';
-import { projectById, useApp, useCurrentUser, userById } from '../../store/AppContext';
+import { projectById, runAutoAcceptCheck, useApp, useCurrentUser, userById } from '../../store/AppContext';
 import { canManageTaskForProject, visibleProjects } from '../../lib/roles';
 import { useUI } from '../../components/layout/UIContext';
 import type { Priority, Task, TaskStatus, User } from '../../types';
 import { PRIORITIES, TASK_STATUSES, priorityLabel, taskStatusLabel } from '../../types';
 import { Button } from '../../components/ui/button';
 import { Badge, PriorityBadge, TaskStatusBadge } from '../../components/ui/badge';
-import { Input, Select } from '../../components/ui/input';
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../components/ui/dialog';
+import { Input, Select, Textarea } from '../../components/ui/input';
 import { Tabs } from '../../components/ui/tabs';
 import { AvatarStack } from '../../components/ui/avatar';
 import { Checkbox } from '../../components/ui/controls';
@@ -63,6 +64,11 @@ function TaskCardContent({ task, dragHandle }: { task: Task; dragHandle?: ReactN
         {dragHandle}
       </div>
       <p className="line-clamp-2 mt-1 text-sm font-medium leading-snug">{task.title}</p>
+      {task.declinedBy && (
+        <div className="mt-1.5">
+          <Badge tone="destructive">Đã từ chối</Badge>
+        </div>
+      )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <PriorityBadge priority={task.priority} />
         <span className={cn('inline-flex items-center gap-1 text-xs', dueToneClass[due.tone])}>
@@ -369,7 +375,10 @@ function TaskTable({ tasks, onOpenTask, canManage }: { tasks: Task[]; onOpenTask
                     </td>
                   )}
                   <td className="p-3">
-                    <p className="font-medium">{t.title}</p>
+                    <p className="flex flex-wrap items-center gap-2 font-medium">
+                      {t.title}
+                      {t.declinedBy && <Badge tone="destructive">Đã từ chối</Badge>}
+                    </p>
                     <p className="font-mono text-xs text-muted-foreground">{t.code}</p>
                   </td>
                   <td className="p-3 text-muted-foreground">{project?.name ?? '—'}</td>
@@ -539,6 +548,8 @@ export function ProjectTaskBoard({ projectId }: { projectId: string }) {
 
 /* ---------------- MyTasksPage ---------------- */
 
+const DECLINE_REASON_SUGGESTIONS = ['Bệnh', 'Chấn thương', 'Nhiều việc — không làm hết'];
+
 function MyTaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
@@ -546,50 +557,138 @@ function MyTaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const due = dueLabel(task.dueDate, task.status);
   const isDone = task.status === 'done';
   const isPendingReview = task.status === 'in_review';
+  const isDeclined = Boolean(task.declinedBy);
+  // Chỉ hiện nút phản hồi với task đang chờ nhận (todo). Đổi trạng thái bằng
+  // cách khác (tick/kéo/drawer) cũng tính là đã phản hồi → ẩn 2 nút.
+  const showResponse = task.status === 'todo';
   // Leader/Admin được hoàn thành trực tiếp; thành viên tick thì gửi chờ duyệt
   // (guard chỉ chặn chuyển ra khỏi "Chờ duyệt", nên tick thẳng sang "done"
   // trước đây đã bỏ qua bước duyệt).
   const canCompleteDirectly = !!project && canManageTaskForProject(project, me);
+  const [declineOpen, setDeclineOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
+  const [declineError, setDeclineError] = useState('');
+
+  const accept = async () => {
+    const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: 'in_progress' });
+    if (ok) toast('Đã nhận nhiệm vụ', task.title);
+  };
+
+  const submitDecline = async () => {
+    const reason = declineReason.trim();
+    if (!reason) {
+      setDeclineError('Nhập lý do để Leader biết và sắp xếp lại.');
+      return;
+    }
+    const ok = await dispatch({ type: 'TASK_DECLINE', id: task.id, reason });
+    if (ok) {
+      setDeclineOpen(false);
+      setDeclineReason('');
+      setDeclineError('');
+      const leader = project ? userById(state.users, project.managerId) : undefined;
+      toast('Đã gửi từ chối', leader ? `Leader ${leader.name} sẽ xem xét và sắp xếp lại.` : task.title);
+    }
+  };
 
   return (
-    <div
-      onClick={onOpen}
-      className="flex cursor-pointer items-center gap-3 rounded-lg border bg-card p-3 shadow-soft transition-shadow hover:shadow-lift"
-    >
-      <Checkbox
-        checked={isDone || isPendingReview}
-        indeterminate={isPendingReview}
-        disabled={isPendingReview}
-        onChange={async () => {
-          if (isPendingReview) return;
-          if (isDone) {
-            const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: 'todo' });
-            if (ok) toast('Đã mở lại nhiệm vụ', task.title);
-            return;
-          }
-          const next = canCompleteDirectly ? 'done' : 'in_review';
-          const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: next });
-          if (ok) toast(canCompleteDirectly ? 'Hoàn thành nhiệm vụ' : 'Đã gửi chờ duyệt', task.title);
-        }}
-      />
-      <div className="min-w-0 flex-1">
-        <p className={cn('truncate text-sm font-medium', isDone && 'text-muted-foreground line-through')}>{task.title}</p>
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-          <span className="font-mono">{task.code}</span>
-          <span>{project?.name ?? '—'}</span>
-          <PriorityBadge priority={task.priority} />
-          {isPendingReview && <TaskStatusBadge status="in_review" />}
-        </p>
+    <>
+      <div
+        onClick={onOpen}
+        className="flex cursor-pointer items-center gap-3 rounded-lg border bg-card p-3 shadow-soft transition-shadow hover:shadow-lift"
+      >
+        <Checkbox
+          checked={isDone || isPendingReview}
+          indeterminate={isPendingReview}
+          disabled={isPendingReview || isDeclined}
+          onChange={async () => {
+            if (isPendingReview || isDeclined) return;
+            if (isDone) {
+              const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: 'todo' });
+              if (ok) toast('Đã mở lại nhiệm vụ', task.title);
+              return;
+            }
+            const next = canCompleteDirectly ? 'done' : 'in_review';
+            const ok = await dispatch({ type: 'TASK_MOVE', id: task.id, status: next });
+            if (ok) toast(canCompleteDirectly ? 'Hoàn thành nhiệm vụ' : 'Đã gửi chờ duyệt', task.title);
+          }}
+        />
+        <div className="min-w-0 flex-1">
+          <p className={cn('truncate text-sm font-medium', isDone && 'text-muted-foreground line-through')}>{task.title}</p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-mono">{task.code}</span>
+            <span>{project?.name ?? '—'}</span>
+            <PriorityBadge priority={task.priority} />
+            {isPendingReview && <TaskStatusBadge status="in_review" />}
+            {isDeclined && <Badge tone="destructive">Đã từ chối</Badge>}
+          </p>
+          {isDeclined && task.declinedReason && (
+            <p className="mt-1 truncate text-xs text-destructive">Lý do: {task.declinedReason}</p>
+          )}
+        </div>
+        {showResponse && (
+          <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            <Button size="sm" onClick={accept}>Thực hiện</Button>
+            {!isDeclined && (
+              <Button size="sm" variant="outline" onClick={() => { setDeclineReason(''); setDeclineError(''); setDeclineOpen(true); }}>
+                Từ chối
+              </Button>
+            )}
+          </div>
+        )}
+        <span className={cn('hidden shrink-0 text-xs sm:block', dueToneClass[due.tone])}>{due.text}</span>
       </div>
-      <span className={cn('shrink-0 text-xs', dueToneClass[due.tone])}>{due.text}</span>
-    </div>
+
+      <Dialog open={declineOpen} onClose={() => setDeclineOpen(false)}>
+        <DialogHeader title="Từ chối nhận nhiệm vụ" desc={`"${task.title}" — Leader sẽ nhận được thông báo để xem xét dời deadline hoặc phân bố lại cho thành viên khác.`} />
+        <DialogBody>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {DECLINE_REASON_SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => { setDeclineReason(s); setDeclineError(''); }}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-xs',
+                  declineReason === s ? 'border-primary bg-primary/10 text-primary' : 'border-input hover:bg-accent',
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor={`decline-reason-${task.id}`}>
+            Lý do từ chối (bắt buộc)
+          </label>
+          <Textarea
+            id={`decline-reason-${task.id}`}
+            value={declineReason}
+            onChange={(e) => { setDeclineReason(e.target.value); setDeclineError(''); }}
+            placeholder="VD: Đang ốm, không làm kịp tuần này..."
+            rows={3}
+          />
+          {declineError && <p className="mt-1.5 text-xs text-destructive">{declineError}</p>}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setDeclineOpen(false)}>Hủy</Button>
+          <Button variant="destructive" onClick={submitDecline}>Gửi từ chối</Button>
+        </DialogFooter>
+      </Dialog>
+    </>
   );
 }
 
 export function MyTasksPage() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const { openTask } = useUI();
   const me = useCurrentUser();
+
+  // Tự động nhận sau 12h — kiểm tra lại khi mở tab (phòng phiên làm việc dài
+  // quá 12h mà không có thay đổi dữ liệu nào kích hoạt kiểm tra ở AppProvider).
+  // Chỉ chạy lúc mount nên cố tình không đưa state.tasks vào deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    void runAutoAcceptCheck(state.tasks, dispatch);
+  }, [dispatch]);
 
   const groups = useMemo(() => {
     // Chỉ tính nhiệm vụ trong các dự án mình được thấy (đã tham gia; Admin thấy tất cả).

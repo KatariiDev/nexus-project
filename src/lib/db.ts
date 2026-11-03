@@ -81,6 +81,10 @@ interface DbTask {
   estimate_hours: number | string | null;
   actual_hours: number | string | null;
   completed_at: string | null;
+  assigned_at: string | null;
+  declined_by: string | null;
+  declined_reason: string | null;
+  declined_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,7 +96,7 @@ const dateToApp = (d: string | null): string => (d ? `${d.slice(0, 10)}T00:00:00
 /** ISO datetime -> 'YYYY-MM-DD' (cho cột date) hoặc null. */
 const dateToDb = (iso?: string): string | null => (iso ? iso.slice(0, 10) : null);
 /** Chuỗi rỗng -> null (cho cột timestamptz). */
-const tsToDb = (iso?: string): string | null => (iso && iso.trim() !== '' ? iso : null);
+const tsToDb = (iso?: string | null): string | null => (iso && iso.trim() !== '' ? iso : null);
 const num = (v: number | string | null | undefined): number | undefined =>
   v === null || v === undefined || v === '' ? undefined : Number(v);
 
@@ -169,6 +173,10 @@ function mapTask(r: DbTask, assigneeIds: string[], watcherIds: string[], labelId
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at ?? undefined,
+    assignedAt: r.assigned_at ?? undefined,
+    declinedBy: r.declined_by ?? undefined,
+    declinedReason: r.declined_reason ?? undefined,
+    declinedAt: r.declined_at ?? undefined,
   };
 }
 
@@ -635,6 +643,36 @@ async function notifyReview(
   if (error) throw error;
 }
 
+/**
+ * Thông báo khi thành viên từ chối nhận nhiệm vụ → báo cho Leader của dự án
+ * để xem xét dời deadline hoặc phân bố lại cho thành viên khác.
+ * Chỉ gửi cho Leader (theo kế hoạch đã duyệt).
+ */
+async function notifyDeclined(
+  sb: Sb,
+  ctx: PersistContext,
+  task: Task,
+  reason: string,
+  leaderId?: string,
+): Promise<void> {
+  const targets = leaderId && leaderId !== ctx.userId ? [leaderId] : [];
+  if (targets.length === 0) return;
+  const rows = targets.map((userId) => ({
+    id: newId(),
+    user_id: userId,
+    kind: 'declined',
+    title: 'Có thành viên từ chối nhiệm vụ',
+    body: `${ctx.userName} đã từ chối "${task.title}" (lý do: ${reason}).`,
+    link: `/user/tasks/${task.id}`,
+  }));
+  const { error } = await sb.from('notifications').insert(rows);
+  if (error) {
+    // Kind 'declined' cần chạy file SQL nexus-task-response-db.sql trước
+    // (nới CHECK của notifications.kind). Báo rõ để không bị nhầm là lỗi khác.
+    throw new Error('Không gửi được thông báo từ chối — hãy kiểm tra đã chạy file SQL nexus-task-response-db.sql chưa.');
+  }
+}
+
 function toProjectRow(p: Project, workspaceId: string) {
   return {
     id: p.id,
@@ -668,6 +706,10 @@ function toTaskRow(t: Task) {
     estimate_hours: t.estimateHours ?? null,
     actual_hours: t.actualHours ?? null,
     completed_at: tsToDb(t.completedAt),
+    assigned_at: tsToDb(t.assignedAt),
+    declined_by: t.declinedBy ?? null,
+    declined_reason: t.declinedReason ?? null,
+    declined_at: tsToDb(t.declinedAt),
   };
 }
 
@@ -887,33 +929,44 @@ export async function persistAction(
     }
 
     case 'TASK_ADD': {
-      const { error } = await sb.from('tasks').insert(toTaskRow(action.task));
+      // Đồng hồ 12h tự động nhận bắt đầu từ lúc giao.
+      const task = action.task.assigneeIds.length > 0
+        ? { ...action.task, assignedAt: new Date().toISOString() }
+        : action.task;
+      const { error } = await sb.from('tasks').insert(toTaskRow(task));
       if (error) throwDb(error, 'Không tạo được nhiệm vụ.');
-      await syncJoin(sb, 'task_assignees', 'task_id', action.task.id, 'user_id', [], action.task.assigneeIds);
-      await syncJoin(sb, 'task_watchers', 'task_id', action.task.id, 'user_id', [], action.task.watcherIds);
-      await syncJoin(sb, 'task_labels', 'task_id', action.task.id, 'label_id', [], action.task.labelIds);
-      const log = buildLog(ctx, 'đã tạo', 'task', action.task.id, action.task.title);
+      await syncJoin(sb, 'task_assignees', 'task_id', task.id, 'user_id', [], task.assigneeIds);
+      await syncJoin(sb, 'task_watchers', 'task_id', task.id, 'user_id', [], task.watcherIds);
+      await syncJoin(sb, 'task_labels', 'task_id', task.id, 'label_id', [], task.labelIds);
+      const log = buildLog(ctx, 'đã tạo', 'task', task.id, task.title);
       await insertLog(sb, ctx, log);
-      await notifyAssignees(sb, ctx, action.task, action.task.assigneeIds);
-      return { ...action, log };
+      await notifyAssignees(sb, ctx, task, task.assigneeIds);
+      return { ...action, task, log };
     }
 
     case 'TASK_UPDATE': {
       const prev = state.tasks.find((t) => t.id === action.task.id);
       const statusChanged = prev && prev.status !== action.task.status;
+      const assigneesChanged =
+        prev && [...action.task.assigneeIds].sort().join() !== [...prev.assigneeIds].sort().join();
       let completedAt = action.task.completedAt;
       if (statusChanged) {
         completedAt = action.task.status === 'done' ? new Date().toISOString() : undefined;
       }
-      const task = { ...action.task, completedAt };
+      let task = { ...action.task, completedAt };
+      // Đổi người thực hiện: reset đồng hồ 12h + xóa thông tin từ chối cũ.
+      // Task rời khỏi 'todo' (bắt đầu làm / gửi duyệt / hoàn thành): từ chối không còn ý nghĩa.
+      if (assigneesChanged) {
+        task = { ...task, assignedAt: new Date().toISOString(), declinedBy: undefined, declinedReason: undefined, declinedAt: undefined };
+      } else if (statusChanged && task.status !== 'todo') {
+        task = { ...task, declinedBy: undefined, declinedReason: undefined, declinedAt: undefined };
+      }
       const { error } = await sb.from('tasks').update(toTaskRow(task)).eq('id', task.id);
       if (error) throwDb(error, 'Không cập nhật được nhiệm vụ.');
       await syncJoin(sb, 'task_assignees', 'task_id', task.id, 'user_id', prev?.assigneeIds ?? [], task.assigneeIds);
       await syncJoin(sb, 'task_watchers', 'task_id', task.id, 'user_id', prev?.watcherIds ?? [], task.watcherIds);
       await syncJoin(sb, 'task_labels', 'task_id', task.id, 'label_id', prev?.labelIds ?? [], task.labelIds);
       // Chỉ ghi log cho sự kiện đáng chú ý (đổi trạng thái / đổi người thực hiện), tránh spam.
-      const assigneesChanged =
-        prev && [...task.assigneeIds].sort().join() !== [...prev.assigneeIds].sort().join();
       let log: ActivityLog | undefined;
       if (statusChanged || assigneesChanged) {
         log = buildLog(ctx, statusChanged ? 'đã chuyển trạng thái' : 'đã cập nhật người thực hiện', 'task', task.id, task.title);
@@ -942,7 +995,11 @@ export async function persistAction(
       if (!task) return action;
       const wasReview = task.status === 'in_review';
       const completedAt = action.status === 'done' ? new Date().toISOString() : null;
-      const { error } = await sb.from('tasks').update({ status: action.status, completed_at: completedAt }).eq('id', action.id);
+      // Task rời khỏi 'todo' (nhận làm / gửi duyệt / hoàn thành): từ chối không còn ý nghĩa.
+      const clearDecline = action.status !== 'todo'
+        ? { declined_by: null, declined_reason: null, declined_at: null }
+        : {};
+      const { error } = await sb.from('tasks').update({ status: action.status, completed_at: completedAt, ...clearDecline }).eq('id', action.id);
       if (error) throwDb(error, 'Không chuyển trạng thái được.');
       const log = buildLog(ctx, 'đã chuyển trạng thái', 'task', task.id, task.title);
       await insertLog(sb, ctx, log);
@@ -954,6 +1011,40 @@ export async function persistAction(
       } else if (wasReview) {
         await notifyReview(sb, ctx, task, 'rejected');
       }
+      return { ...action, log };
+    }
+
+    case 'TASK_DECLINE': {
+      const task = state.tasks.find((t) => t.id === action.id);
+      if (!task) return action;
+      const declinedAt = new Date().toISOString();
+      const { error } = await sb.from('tasks').update({
+        declined_by: ctx.userId,
+        declined_reason: action.reason,
+        declined_at: declinedAt,
+      }).eq('id', action.id);
+      if (error) throwDb(error, 'Không gửi được từ chối.');
+      const log = buildLog(ctx, 'đã từ chối nhận', 'task', task.id, task.title);
+      await insertLog(sb, ctx, log);
+      const leaderId = state.projects.find((p) => p.id === task.projectId)?.managerId;
+      await notifyDeclined(sb, ctx, task, action.reason, leaderId);
+      return { ...action, log };
+    }
+
+    case 'TASK_AUTO_ACCEPT': {
+      const task = state.tasks.find((t) => t.id === action.id);
+      if (!task) return action;
+      // Chỉ đổi trạng thái + log riêng; không gửi thông báo (theo kế hoạch đã duyệt).
+      const { error } = await sb.from('tasks').update({
+        status: 'in_progress',
+        completed_at: null,
+        declined_by: null,
+        declined_reason: null,
+        declined_at: null,
+      }).eq('id', action.id);
+      if (error) throwDb(error, 'Không tự động xác nhận được nhiệm vụ.');
+      const log = buildLog(ctx, 'đã được hệ thống tự động xác nhận thực hiện (quá 12h không phản hồi)', 'task', task.id, task.title);
+      await insertLog(sb, ctx, log);
       return { ...action, log };
     }
 
