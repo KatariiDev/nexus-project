@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CalendarDays, Eye, FileText, Flag, History, Link2, ListChecks,
-  MessageSquare, Paperclip, Save, Send, Tag, Timer, Trash2, Users, X,
+  MessageSquare, Paperclip, Pencil, Save, Send, Tag, Timer, Trash2, Users, X, XCircle,
 } from 'lucide-react';
 import { projectById, taskById, useApp, useCurrentUser, userById } from '../../store/AppContext';
 import type { Priority, Task, TaskStatus, User } from '../../types';
@@ -16,7 +16,7 @@ import { Checkbox } from '../../components/ui/controls';
 import { Progress } from '../../components/ui/progress';
 import { ConfirmDialog } from '../../components/ui/feedback';
 import { toast } from '../../components/ui/toast';
-import { dueLabel, fmtDate, timeAgo } from '../../lib/format';
+import { dueLabel, fmtDate, fmtDateTime, timeAgo } from '../../lib/format';
 import { cn, newId } from '../../lib/utils';
 import { canManageTaskForProject } from '../../lib/roles';
 import { dateInputToISO, isoToDateInput } from './helpers';
@@ -99,6 +99,10 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
   const canManage = !!project && canManageTaskForProject(project, me);
   const isAssignee = task.assigneeIds.includes(me.id);
   const canChangeStatus = canManage || isAssignee;
+  // Drawer mở ra ở dạng chỉ xem cho mọi người (kể cả Leader/Admin); bấm
+  // "Chỉnh sửa" ở footer mới sang dạng sửa. Thành viên không có nút này.
+  const [editing, setEditing] = useState(false);
+  const canEdit = canManage && editing;
   // Giao nhiệm vụ chỉ cho thành viên trong dự án đó.
   const projectMemberUsers = project
     ? state.users.filter((u) => u.id === project.managerId || project.memberIds.includes(u.id))
@@ -134,6 +138,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
   );
   const due = dueLabel(task.dueDate, task.status);
   const creatorName = userById(state.users, task.creatorId)?.name ?? '—';
+  const declinerName = task.declinedBy ? userById(state.users, task.declinedBy)?.name ?? '—' : null;
 
   const saveTitle = () => {
     const t = title.trim();
@@ -170,7 +175,11 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
     }
     if (Object.keys(patch).length === 0) return;
     const ok = await update(patch);
-    if (ok) toast('Đã cập nhật nhiệm vụ');
+    if (ok) {
+      toast('Đã cập nhật nhiệm vụ');
+      // Lưu xong thì về lại dạng chỉ xem.
+      setEditing(false);
+    }
   };
 
   const addChecklist = () => {
@@ -209,7 +218,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
       <div className="flex items-start justify-between gap-3 border-b p-4">
         <div className="min-w-0 flex-1">
           <Badge tone="muted" className="font-mono">{task.code}</Badge>
-          {canManage ? (
+          {canEdit ? (
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -229,7 +238,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
 
       {/* Trạng thái + ưu tiên */}
       <div className="flex flex-wrap items-center gap-2 border-b p-4">
-        {canChangeStatus ? (
+        {canChangeStatus && (!canManage || editing) ? (
           <Select value={task.status} onChange={async (e) => { const ok = await update({ status: e.target.value as TaskStatus }); if (ok) toast('Đã cập nhật trạng thái'); }} className="w-auto" aria-label="Trạng thái">
             {TASK_STATUSES.map((s) => (
               <option key={s.value} value={s.value}>{s.label}</option>
@@ -238,7 +247,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
         ) : (
           <TaskStatusBadge status={task.status} />
         )}
-        {canManage ? (
+        {canEdit ? (
           <Select value={task.priority} onChange={(e) => { update({ priority: e.target.value as Priority }); toast('Đã cập nhật mức ưu tiên'); }} className="w-auto" aria-label="Ưu tiên">
             {PRIORITIES.map((p) => (
               <option key={p.value} value={p.value}>{p.label}</option>
@@ -252,6 +261,24 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
           {due.text}
         </span>
       </div>
+
+      {/* Thông tin từ chối nhận (nếu có) */}
+      {task.declinedBy && (
+        <div className="border-b border-destructive/30 bg-destructive/5 p-4">
+          <p className="flex items-center gap-2 text-sm font-medium text-destructive">
+            <XCircle className="h-4 w-4" />
+            Đã từ chối nhận nhiệm vụ
+          </p>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            {declinerName}
+            {task.declinedAt ? ` · ${fmtDateTime(task.declinedAt)}` : ''}
+          </p>
+          {task.declinedReason && <p className="mt-1 text-sm">Lý do: {task.declinedReason}</p>}
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Leader có thể dời deadline hoặc đổi người thực hiện ở mục Thông tin bên dưới.
+          </p>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {/* Thông tin */}
@@ -271,7 +298,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
             </div>
             <div>
               <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground"><Users className="h-3.5 w-3.5" />Người thực hiện</dt>
-              {canManage ? (
+              {canEdit ? (
                 <UserMultiSelect users={projectMemberUsers} selected={task.assigneeIds} onToggle={(id) => update({ assigneeIds: toggleId(task.assigneeIds, id) })} />
               ) : (
                 <div className="flex flex-col gap-1.5">
@@ -290,7 +317,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
             </div>
             <div>
               <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground"><Eye className="h-3.5 w-3.5" />Người theo dõi</dt>
-              {canManage ? (
+              {canEdit ? (
                 <UserMultiSelect users={state.users} selected={task.watcherIds} onToggle={(id) => update({ watcherIds: toggleId(task.watcherIds, id) })} />
               ) : (
                 <div className="flex flex-col gap-1.5">
@@ -310,7 +337,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
             <div>
               <dt className="text-xs text-muted-foreground">Ngày bắt đầu</dt>
               <dd className="mt-1">
-                {canManage ? (
+                {canEdit ? (
                   <Input type="date" value={isoToDateInput(task.startDate)} onChange={(e) => update({ startDate: dateInputToISO(e.target.value) })} />
                 ) : (
                   <span className="text-sm">{fmtDate(task.startDate)}</span>
@@ -320,7 +347,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
             <div>
               <dt className="text-xs text-muted-foreground">Deadline</dt>
               <dd className="mt-1">
-                {canManage ? (
+                {canEdit ? (
                   <Input type="date" value={isoToDateInput(task.dueDate)} onChange={(e) => update({ dueDate: dateInputToISO(e.target.value) })} />
                 ) : (
                   <span className="text-sm">{fmtDate(task.dueDate)}</span>
@@ -328,19 +355,9 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
               </dd>
             </div>
             <div>
-              <dt className="flex items-center gap-1 text-xs text-muted-foreground"><Timer className="h-3.5 w-3.5" />Giờ ước tính</dt>
-              <dd className="mt-1">
-                {canManage ? (
-                  <Input type="number" min={0} step={0.5} value={task.estimateHours ?? ''} onChange={(e) => update({ estimateHours: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} />
-                ) : (
-                  <span className="text-sm">{task.estimateHours != null ? `${task.estimateHours} giờ` : '—'}</span>
-                )}
-              </dd>
-            </div>
-            <div>
               <dt className="flex items-center gap-1 text-xs text-muted-foreground"><Timer className="h-3.5 w-3.5" />Giờ thực tế</dt>
               <dd className="mt-1">
-                {canManage ? (
+                {canEdit ? (
                   <Input type="number" min={0} step={0.5} value={task.actualHours ?? ''} onChange={(e) => update({ actualHours: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} />
                 ) : (
                   <span className="text-sm">{task.actualHours != null ? `${task.actualHours} giờ` : '—'}</span>
@@ -355,15 +372,15 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
           <div className="flex flex-wrap gap-2">
             {state.labels.map((l) => {
               const active = task.labelIds.includes(l.id);
-              // Thành viên chỉ xem: chỉ hiện nhãn đã gắn, không hiện nhãn chưa gắn.
-              if (!canManage && !active) return null;
+              // Chỉ xem: chỉ hiện nhãn đã gắn, không hiện nhãn chưa gắn.
+              if (!canEdit && !active) return null;
               const chip = (
                 <>
                   <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color }} />
                   {l.name}
                 </>
               );
-              return canManage ? (
+              return canEdit ? (
                 <button
                   key={l.id}
                   onClick={() => update({ labelIds: toggleId(task.labelIds, l.id) })}
@@ -383,7 +400,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
                 </span>
               );
             })}
-            {!canManage && task.labelIds.length === 0 && (
+            {!canEdit && task.labelIds.length === 0 && (
               <p className="text-sm text-muted-foreground">Chưa gắn nhãn.</p>
             )}
           </div>
@@ -391,11 +408,11 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
 
         {/* Mô tả */}
         <Section icon={<FileText className="h-4 w-4" />} title="Mô tả" action={
-          canManage ? (
+          canEdit ? (
             <Button size="sm" variant="outline" disabled={description === task.description} onClick={saveDescription}>Lưu</Button>
           ) : undefined
         }>
-          {canManage ? (
+          {canEdit ? (
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="Thêm mô tả chi tiết..." />
           ) : (
             <p className="whitespace-pre-wrap text-sm">{task.description || 'Chưa có mô tả.'}</p>
@@ -440,7 +457,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
                       <span className="mr-2 font-mono text-xs text-muted-foreground">{dep?.code}</span>
                       {dep?.title ?? 'Nhiệm vụ không tồn tại'}
                     </span>
-                    {canManage && (
+                    {canEdit && (
                       <button onClick={() => dispatch({ type: 'DEPENDENCY_DELETE', id: d.id })} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive" aria-label="Gỡ phụ thuộc">
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -450,7 +467,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
               })}
             </div>
           )}
-          {canManage && (
+          {canEdit && (
             <Select value={depValue} onChange={(e) => addDependency(e.target.value)} className="mt-2">
               <option value="">Thêm nhiệm vụ phụ thuộc...</option>
               {depCandidates.map((t) => (
@@ -535,21 +552,29 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
         </Section>
       </div>
 
-      {/* Footer — chỉ Leader/Admin được cập nhật/xóa nhiệm vụ */}
+      {/* Footer — Leader/Admin mở ra ở dạng chỉ xem, bấm "Chỉnh sửa" mới hiện Xóa / Cập nhật */}
       {canManage && (
         <div className="flex gap-2 border-t p-4">
-          <Button variant="destructive" className="flex-1" onClick={() => setConfirmDelete(true)}>
-            <Trash2 className="h-4 w-4" />Xóa nhiệm vụ
-          </Button>
-          <Button
-            className="flex-1"
-            disabled={!hasPendingEdits}
-            // Chặn blur của ô tiêu đề để không lưu trùng 2 lần (blur lưu 1 lần, bấm nút lưu 1 lần nữa).
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={saveAll}
-          >
-            <Save className="h-4 w-4" />Cập nhật
-          </Button>
+          {!editing ? (
+            <Button className="flex-1" onClick={() => setEditing(true)}>
+              <Pencil className="h-4 w-4" />Chỉnh sửa
+            </Button>
+          ) : (
+            <>
+              <Button variant="destructive" className="flex-1" onClick={() => setConfirmDelete(true)}>
+                <Trash2 className="h-4 w-4" />Xóa nhiệm vụ
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={!hasPendingEdits}
+                // Chặn blur của ô tiêu đề để không lưu trùng 2 lần (blur lưu 1 lần, bấm nút lưu 1 lần nữa).
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={saveAll}
+              >
+                <Save className="h-4 w-4" />Cập nhật
+              </Button>
+            </>
+          )}
         </div>
       )}
 

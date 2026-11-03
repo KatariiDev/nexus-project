@@ -15,6 +15,7 @@ import type {
   Label,
   Notification,
   Project,
+  ProjectInvitePayload,
   ProjectRequest,
   Task,
   TaskAttachment,
@@ -45,6 +46,7 @@ interface DbWorkspace {
   id: string;
   name: string;
   timezone: string | null;
+  invite_expiry_days: number | null;
 }
 interface DbWorkspaceMember {
   workspace_id: string;
@@ -81,6 +83,10 @@ interface DbTask {
   estimate_hours: number | string | null;
   actual_hours: number | string | null;
   completed_at: string | null;
+  assigned_at: string | null;
+  declined_by: string | null;
+  declined_reason: string | null;
+  declined_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,7 +98,7 @@ const dateToApp = (d: string | null): string => (d ? `${d.slice(0, 10)}T00:00:00
 /** ISO datetime -> 'YYYY-MM-DD' (cho cột date) hoặc null. */
 const dateToDb = (iso?: string): string | null => (iso ? iso.slice(0, 10) : null);
 /** Chuỗi rỗng -> null (cho cột timestamptz). */
-const tsToDb = (iso?: string): string | null => (iso && iso.trim() !== '' ? iso : null);
+const tsToDb = (iso?: string | null): string | null => (iso && iso.trim() !== '' ? iso : null);
 const num = (v: number | string | null | undefined): number | undefined =>
   v === null || v === undefined || v === '' ? undefined : Number(v);
 
@@ -169,6 +175,10 @@ function mapTask(r: DbTask, assigneeIds: string[], watcherIds: string[], labelId
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at ?? undefined,
+    assignedAt: r.assigned_at ?? undefined,
+    declinedBy: r.declined_by ?? undefined,
+    declinedReason: r.declined_reason ?? undefined,
+    declinedAt: r.declined_at ?? undefined,
   };
 }
 
@@ -330,8 +340,8 @@ export async function loadWorkspaceData(
   for (const u of finalUsers) u.workload = Math.min(100, (openCount.get(u.id) ?? 0) * 10);
 
   return {
-    workspace: { id: ws.id, name: ws.name, timezone: ws.timezone ?? 'Asia/Ho_Chi_Minh' },
-    workspaces: wsList.map((w) => ({ id: w.id, name: w.name, timezone: w.timezone ?? 'Asia/Ho_Chi_Minh' })),
+    workspace: { id: ws.id, name: ws.name, timezone: ws.timezone ?? 'Asia/Ho_Chi_Minh', inviteExpiryDays: ws.invite_expiry_days ?? undefined },
+    workspaces: wsList.map((w) => ({ id: w.id, name: w.name, timezone: w.timezone ?? 'Asia/Ho_Chi_Minh', inviteExpiryDays: w.invite_expiry_days ?? undefined })),
     users: finalUsers,
     labels: ((labelsRes.data ?? []) as { id: string; name: string; color: string }[]).map((l) => ({
       id: l.id, name: l.name, color: l.color,
@@ -384,7 +394,7 @@ export async function loadWorkspaceData(
         workspaceId: r.workspace_id,
         type: r.type as ProjectRequest['type'],
         projectId: r.project_id ?? undefined,
-        payload: (r.payload ?? {}) as Partial<Project>,
+        payload: (r.payload ?? {}) as Partial<Project> & Partial<ProjectInvitePayload>,
         status: r.status as ProjectRequest['status'],
         requestedBy: r.requested_by,
         reviewedBy: r.reviewed_by ?? undefined,
@@ -481,6 +491,7 @@ export type RichAction = Action & {
   task?: Task;
   project?: Project;
   request?: ProjectRequest;
+  requests?: ProjectRequest[];
   projectDeletedId?: string;
 };
 
@@ -519,6 +530,8 @@ function requestTitle(
       return `Xóa dự án${name}`;
     case 'join_project':
       return `Xin tham gia dự án${name}`;
+    case 'invite_member':
+      return `Mời vào dự án${name}`;
   }
 }
 
@@ -635,6 +648,36 @@ async function notifyReview(
   if (error) throw error;
 }
 
+/**
+ * Thông báo khi thành viên từ chối nhận nhiệm vụ → báo cho Leader của dự án
+ * để xem xét dời deadline hoặc phân bố lại cho thành viên khác.
+ * Chỉ gửi cho Leader (theo kế hoạch đã duyệt).
+ */
+async function notifyDeclined(
+  sb: Sb,
+  ctx: PersistContext,
+  task: Task,
+  reason: string,
+  leaderId?: string,
+): Promise<void> {
+  const targets = leaderId && leaderId !== ctx.userId ? [leaderId] : [];
+  if (targets.length === 0) return;
+  const rows = targets.map((userId) => ({
+    id: newId(),
+    user_id: userId,
+    kind: 'declined',
+    title: 'Có thành viên từ chối nhiệm vụ',
+    body: `${ctx.userName} đã từ chối "${task.title}" (lý do: ${reason}).`,
+    link: `/user/tasks/${task.id}`,
+  }));
+  const { error } = await sb.from('notifications').insert(rows);
+  if (error) {
+    // Kind 'declined' cần chạy file SQL nexus-task-response-db.sql trước
+    // (nới CHECK của notifications.kind). Báo rõ để không bị nhầm là lỗi khác.
+    throw new Error('Không gửi được thông báo từ chối — hãy kiểm tra đã chạy file SQL nexus-task-response-db.sql chưa.');
+  }
+}
+
 function toProjectRow(p: Project, workspaceId: string) {
   return {
     id: p.id,
@@ -668,6 +711,10 @@ function toTaskRow(t: Task) {
     estimate_hours: t.estimateHours ?? null,
     actual_hours: t.actualHours ?? null,
     completed_at: tsToDb(t.completedAt),
+    assigned_at: tsToDb(t.assignedAt),
+    declined_by: t.declinedBy ?? null,
+    declined_reason: t.declinedReason ?? null,
+    declined_at: tsToDb(t.declinedAt),
   };
 }
 
@@ -745,6 +792,82 @@ export async function persistAction(
       return { ...action, log };
     }
 
+    case 'PROJECT_INVITE_MEMBER': {
+      const project = state.projects.find((p) => p.id === action.projectId);
+      if (!project) throwDb(new Error('not found'), 'Không tìm thấy dự án.');
+      const expiryDays = state.workspace.inviteExpiryDays ?? 3;
+      const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
+      const now = new Date().toISOString();
+      // Lọc bỏ người đã là thành viên hoặc đang có lời mời chờ xử lý.
+      const pendingInviteeIds = new Set(
+        state.projectRequests
+          .filter((r) => r.type === 'invite_member' && r.projectId === project.id && r.status === 'pending')
+          .map((r) => r.payload.invitee_id)
+          .filter((id): id is string => typeof id === 'string'),
+      );
+      const inviteeIds = [...new Set(action.inviteeIds)].filter(
+        (id) => !project.memberIds.includes(id) && id !== project.managerId && !pendingInviteeIds.has(id),
+      );
+      if (inviteeIds.length === 0) throw new Error('Không còn ai để mời (đã là thành viên hoặc đang chờ chấp nhận).');
+      const requests: ProjectRequest[] = inviteeIds.map((inviteeId) => ({
+        id: newId(),
+        workspaceId: ctx.workspaceId,
+        type: 'invite_member' as const,
+        projectId: project.id,
+        payload: { invitee_id: inviteeId, expires_at: expiresAt },
+        status: 'pending' as const,
+        requestedBy: ctx.userId,
+        createdAt: now,
+      }));
+      const { error: rErr } = await sb.from('project_requests').insert(
+        requests.map((r) => ({
+          id: r.id,
+          workspace_id: ctx.workspaceId,
+          type: 'invite_member',
+          project_id: project.id,
+          payload: { invitee_id: r.payload.invitee_id, expires_at: expiresAt },
+          status: 'pending',
+          requested_by: ctx.userId,
+        })),
+      );
+      if (rErr) throwDb(rErr, 'Không gửi được lời mời. Hãy kiểm tra đã chạy file SQL nexus-project-invites-db.sql chưa.');
+      const { error: nErr } = await sb.from('notifications').insert(
+        inviteeIds.map((inviteeId) => ({
+          id: newId(),
+          user_id: inviteeId,
+          kind: 'invite',
+          title: 'Bạn được mời vào dự án',
+          body: `${ctx.userName} mời bạn vào dự án "${project.name}". Lời mời hết hạn sau ${expiryDays} ngày.`,
+          link: `/user/projects/${project.id}`,
+        })),
+      );
+      if (nErr) throwDb(nErr, 'Không gửi được thông báo mời. Hãy kiểm tra đã chạy file SQL nexus-project-invites-db.sql chưa.');
+      return { ...action, requests };
+    }
+
+    case 'PROJECT_INVITE_CANCEL': {
+      const req = state.projectRequests.find((x) => x.id === action.id);
+      if (!req) throwDb(new Error('not found'), 'Không tìm thấy lời mời.');
+      if (req.type !== 'invite_member') throw new Error('Đây không phải lời mời vào dự án.');
+      if (req.status !== 'pending') throwDb(new Error('already reviewed'), 'Lời mời đã được xử lý trước đó.');
+      const { error } = await sb.from('project_requests').delete().eq('id', action.id);
+      if (error) throwDb(error, 'Không hủy được lời mời.');
+      const proj = req.projectId ? state.projects.find((p) => p.id === req.projectId) : undefined;
+      const invitee = state.users.find((u) => u.id === req.payload.invitee_id);
+      const log = buildLog(ctx, `đã hủy lời mời ${invitee?.name ?? 'thành viên'} vào dự án`, 'project', proj?.id ?? req.id, proj?.name ?? '');
+      await insertLog(sb, ctx, log);
+      return { ...action, log };
+    }
+
+    case 'WORKSPACE_UPDATE_SETTINGS': {
+      const { error } = await sb
+        .from('workspaces')
+        .update({ invite_expiry_days: action.inviteExpiryDays })
+        .eq('id', ctx.workspaceId);
+      if (error) throwDb(error, 'Không lưu được cấu hình. Hãy kiểm tra đã chạy file SQL nexus-project-invites-db.sql chưa.');
+      return action;
+    }
+
     case 'PROJECT_REQUEST_REVIEW': {
       const req = state.projectRequests.find((x) => x.id === action.id);
       if (!req) throwDb(new Error('not found'), 'Không tìm thấy yêu cầu.');
@@ -795,6 +918,19 @@ export async function persistAction(
         }
         await syncJoin(sb, 'project_members', 'project_id', project.id, 'user_id', [], project.memberIds);
         createdProject = project;
+      }
+
+      // Lời mời vào dự án: người được mời tự chấp nhận — họ không sửa được
+      // bảng projects/project_members theo RLS nên gọi hàm security definer
+      // accept_project_invite (chỉ chèn vào project_members). Làm TRƯỚC khi
+      // đổi trạng thái đơn để lỗi thì đơn vẫn ở "pending", duyệt lại được.
+      if (action.approve && req.type === 'invite_member') {
+        const expiresAt = req.payload.expires_at;
+        if (!expiresAt || new Date(expiresAt).getTime() <= Date.now()) {
+          throw new Error('Lời mời đã hết hạn. Hãy nhờ Leader hoặc Admin mời lại.');
+        }
+        const { error: rpcErr } = await sb.rpc('accept_project_invite', { p_request_id: req.id });
+        if (rpcErr) throwDb(rpcErr, 'Không chấp nhận được lời mời. Hãy kiểm tra đã chạy file SQL nexus-project-invites-db.sql chưa.');
       }
 
       const { error } = await sb
@@ -848,6 +984,16 @@ export async function persistAction(
             executedLog = buildLog(ctx, `đã cho phép ${requester?.name ?? 'thành viên mới'} tham gia`, 'project', proj.id, proj.name);
             await insertLog(sb, ctx, executedLog);
           }
+        } else if (req.type === 'invite_member' && req.projectId) {
+          // Người được mời đã vào dự án qua hàm accept_project_invite (xem phía trên);
+          // ở đây chỉ cập nhật state + ghi log.
+          const proj = state.projects.find((x) => x.id === req.projectId);
+          const inviteeId = req.payload.invitee_id;
+          if (proj && typeof inviteeId === 'string' && !proj.memberIds.includes(inviteeId)) {
+            reviewedProject = { ...proj, memberIds: [...proj.memberIds, inviteeId], updatedAt: now };
+            executedLog = buildLog(ctx, 'đã chấp nhận lời mời tham gia', 'project', proj.id, proj.name);
+            await insertLog(sb, ctx, executedLog);
+          }
         }
       }
 
@@ -857,6 +1003,15 @@ export async function persistAction(
         if (proj) {
           const requester = state.users.find((u) => u.id === req.requestedBy);
           executedLog = buildLog(ctx, `đã từ chối ${requester?.name ?? 'thành viên mới'} tham gia`, 'project', proj.id, proj.name);
+          await insertLog(sb, ctx, executedLog);
+        }
+      }
+
+      // Từ chối lời mời vào dự án: ghi lại vào Hoạt động của dự án.
+      if (!action.approve && req.type === 'invite_member' && req.projectId) {
+        const proj = state.projects.find((x) => x.id === req.projectId);
+        if (proj) {
+          executedLog = buildLog(ctx, 'đã từ chối lời mời tham gia', 'project', proj.id, proj.name);
           await insertLog(sb, ctx, executedLog);
         }
       }
@@ -887,33 +1042,44 @@ export async function persistAction(
     }
 
     case 'TASK_ADD': {
-      const { error } = await sb.from('tasks').insert(toTaskRow(action.task));
+      // Đồng hồ 12h tự động nhận bắt đầu từ lúc giao.
+      const task = action.task.assigneeIds.length > 0
+        ? { ...action.task, assignedAt: new Date().toISOString() }
+        : action.task;
+      const { error } = await sb.from('tasks').insert(toTaskRow(task));
       if (error) throwDb(error, 'Không tạo được nhiệm vụ.');
-      await syncJoin(sb, 'task_assignees', 'task_id', action.task.id, 'user_id', [], action.task.assigneeIds);
-      await syncJoin(sb, 'task_watchers', 'task_id', action.task.id, 'user_id', [], action.task.watcherIds);
-      await syncJoin(sb, 'task_labels', 'task_id', action.task.id, 'label_id', [], action.task.labelIds);
-      const log = buildLog(ctx, 'đã tạo', 'task', action.task.id, action.task.title);
+      await syncJoin(sb, 'task_assignees', 'task_id', task.id, 'user_id', [], task.assigneeIds);
+      await syncJoin(sb, 'task_watchers', 'task_id', task.id, 'user_id', [], task.watcherIds);
+      await syncJoin(sb, 'task_labels', 'task_id', task.id, 'label_id', [], task.labelIds);
+      const log = buildLog(ctx, 'đã tạo', 'task', task.id, task.title);
       await insertLog(sb, ctx, log);
-      await notifyAssignees(sb, ctx, action.task, action.task.assigneeIds);
-      return { ...action, log };
+      await notifyAssignees(sb, ctx, task, task.assigneeIds);
+      return { ...action, task, log };
     }
 
     case 'TASK_UPDATE': {
       const prev = state.tasks.find((t) => t.id === action.task.id);
       const statusChanged = prev && prev.status !== action.task.status;
+      const assigneesChanged =
+        prev && [...action.task.assigneeIds].sort().join() !== [...prev.assigneeIds].sort().join();
       let completedAt = action.task.completedAt;
       if (statusChanged) {
         completedAt = action.task.status === 'done' ? new Date().toISOString() : undefined;
       }
-      const task = { ...action.task, completedAt };
+      let task = { ...action.task, completedAt };
+      // Đổi người thực hiện: reset đồng hồ 12h + xóa thông tin từ chối cũ.
+      // Task rời khỏi 'todo' (bắt đầu làm / gửi duyệt / hoàn thành): từ chối không còn ý nghĩa.
+      if (assigneesChanged) {
+        task = { ...task, assignedAt: new Date().toISOString(), declinedBy: undefined, declinedReason: undefined, declinedAt: undefined };
+      } else if (statusChanged && task.status !== 'todo') {
+        task = { ...task, declinedBy: undefined, declinedReason: undefined, declinedAt: undefined };
+      }
       const { error } = await sb.from('tasks').update(toTaskRow(task)).eq('id', task.id);
       if (error) throwDb(error, 'Không cập nhật được nhiệm vụ.');
       await syncJoin(sb, 'task_assignees', 'task_id', task.id, 'user_id', prev?.assigneeIds ?? [], task.assigneeIds);
       await syncJoin(sb, 'task_watchers', 'task_id', task.id, 'user_id', prev?.watcherIds ?? [], task.watcherIds);
       await syncJoin(sb, 'task_labels', 'task_id', task.id, 'label_id', prev?.labelIds ?? [], task.labelIds);
       // Chỉ ghi log cho sự kiện đáng chú ý (đổi trạng thái / đổi người thực hiện), tránh spam.
-      const assigneesChanged =
-        prev && [...task.assigneeIds].sort().join() !== [...prev.assigneeIds].sort().join();
       let log: ActivityLog | undefined;
       if (statusChanged || assigneesChanged) {
         log = buildLog(ctx, statusChanged ? 'đã chuyển trạng thái' : 'đã cập nhật người thực hiện', 'task', task.id, task.title);
@@ -942,7 +1108,11 @@ export async function persistAction(
       if (!task) return action;
       const wasReview = task.status === 'in_review';
       const completedAt = action.status === 'done' ? new Date().toISOString() : null;
-      const { error } = await sb.from('tasks').update({ status: action.status, completed_at: completedAt }).eq('id', action.id);
+      // Task rời khỏi 'todo' (nhận làm / gửi duyệt / hoàn thành): từ chối không còn ý nghĩa.
+      const clearDecline = action.status !== 'todo'
+        ? { declined_by: null, declined_reason: null, declined_at: null }
+        : {};
+      const { error } = await sb.from('tasks').update({ status: action.status, completed_at: completedAt, ...clearDecline }).eq('id', action.id);
       if (error) throwDb(error, 'Không chuyển trạng thái được.');
       const log = buildLog(ctx, 'đã chuyển trạng thái', 'task', task.id, task.title);
       await insertLog(sb, ctx, log);
@@ -954,6 +1124,40 @@ export async function persistAction(
       } else if (wasReview) {
         await notifyReview(sb, ctx, task, 'rejected');
       }
+      return { ...action, log };
+    }
+
+    case 'TASK_DECLINE': {
+      const task = state.tasks.find((t) => t.id === action.id);
+      if (!task) return action;
+      const declinedAt = new Date().toISOString();
+      const { error } = await sb.from('tasks').update({
+        declined_by: ctx.userId,
+        declined_reason: action.reason,
+        declined_at: declinedAt,
+      }).eq('id', action.id);
+      if (error) throwDb(error, 'Không gửi được từ chối.');
+      const log = buildLog(ctx, 'đã từ chối nhận', 'task', task.id, task.title);
+      await insertLog(sb, ctx, log);
+      const leaderId = state.projects.find((p) => p.id === task.projectId)?.managerId;
+      await notifyDeclined(sb, ctx, task, action.reason, leaderId);
+      return { ...action, log };
+    }
+
+    case 'TASK_AUTO_ACCEPT': {
+      const task = state.tasks.find((t) => t.id === action.id);
+      if (!task) return action;
+      // Chỉ đổi trạng thái + log riêng; không gửi thông báo (theo kế hoạch đã duyệt).
+      const { error } = await sb.from('tasks').update({
+        status: 'in_progress',
+        completed_at: null,
+        declined_by: null,
+        declined_reason: null,
+        declined_at: null,
+      }).eq('id', action.id);
+      if (error) throwDb(error, 'Không tự động xác nhận được nhiệm vụ.');
+      const log = buildLog(ctx, 'đã được hệ thống tự động xác nhận thực hiện (quá 12h không phản hồi)', 'task', task.id, task.title);
+      await insertLog(sb, ctx, log);
       return { ...action, log };
     }
 

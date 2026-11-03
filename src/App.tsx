@@ -15,7 +15,7 @@ import { GanttPage } from './features/timeline/GanttPage';
 import { TeamPage } from './features/team/TeamPage';
 import { NotificationsPage } from './features/notifications/NotificationsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
-import { AdminShell, AdminOverviewPage, ApprovalsPage, AdminLogsPage, RequireAdmin } from './features/admin/AdminPages';
+import { AdminShell, AdminOverviewPage, ApprovalsPage, AdminLogsPage, AdminSettingsPage, RequireAdmin } from './features/admin/AdminPages';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { state } = useApp();
@@ -178,6 +178,7 @@ export default function App() {
           <Route path="users" element={<TeamPage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="logs" element={<AdminLogsPage />} />
+          <Route path="settings" element={<AdminSettingsPage />} />
         </Route>
 
         <Route path="/" element={<Landing />} />

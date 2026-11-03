@@ -87,12 +87,17 @@ export type Action =
   | { type: 'PROJECT_UPDATE'; project: Project }
   | { type: 'PROJECT_DELETE'; id: string }
   | { type: 'PROJECT_JOIN_REQUEST'; projectId: string }
+  | { type: 'PROJECT_INVITE_MEMBER'; projectId: string; inviteeIds: string[] }
+  | { type: 'PROJECT_INVITE_CANCEL'; id: string }
+  | { type: 'WORKSPACE_UPDATE_SETTINGS'; inviteExpiryDays: number }
   | { type: 'PROJECT_REQUEST_CREATE'; request: ProjectRequest }
   | { type: 'PROJECT_REQUEST_REVIEW'; id: string; approve: boolean; note?: string }
   | { type: 'TASK_ADD'; task: Task }
   | { type: 'TASK_UPDATE'; task: Task }
   | { type: 'TASK_DELETE'; id: string }
   | { type: 'TASK_MOVE'; id: string; status: Task['status'] }
+  | { type: 'TASK_DECLINE'; id: string; reason: string }
+  | { type: 'TASK_AUTO_ACCEPT'; id: string }
   | { type: 'CHECKLIST_TOGGLE'; id: string }
   | { type: 'CHECKLIST_ADD'; id: string; taskId: string; title: string }
   | { type: 'CHECKLIST_DELETE'; id: string }
@@ -122,6 +127,7 @@ export type RichAction =
       task?: Task;
       project?: Project;
       request?: ProjectRequest;
+      requests?: ProjectRequest[];
       projectDeletedId?: string;
     })
   | { type: 'HYDRATE'; bundle: WorkspaceBundle; userId: string }
@@ -232,6 +238,21 @@ function reducer(state: AppState, action: RichAction): AppState {
       return action.request
         ? { ...state, projectRequests: [action.request, ...state.projectRequests] }
         : state;
+    case 'PROJECT_INVITE_MEMBER':
+      return action.requests
+        ? { ...state, projectRequests: [...action.requests, ...state.projectRequests] }
+        : state;
+    case 'PROJECT_INVITE_CANCEL':
+      return {
+        ...state,
+        projectRequests: state.projectRequests.filter((r) => r.id !== action.id),
+        activityLogs: withLog(state.activityLogs, action.log),
+      };
+    case 'WORKSPACE_UPDATE_SETTINGS':
+      return {
+        ...state,
+        workspace: { ...state.workspace, inviteExpiryDays: action.inviteExpiryDays },
+      };
     case 'PROJECT_REQUEST_REVIEW': {
       let projects = state.projects;
       if (action.project) {
@@ -280,6 +301,40 @@ function reducer(state: AppState, action: RichAction): AppState {
         status: action.status,
         updatedAt: new Date().toISOString(),
         completedAt: action.status === 'done' ? new Date().toISOString() : undefined,
+        // Task rời khỏi 'todo': từ chối không còn ý nghĩa.
+        ...(action.status !== 'todo'
+          ? { declinedBy: undefined, declinedReason: undefined, declinedAt: undefined }
+          : {}),
+      };
+      return {
+        ...state,
+        tasks: state.tasks.map((t) => (t.id === action.id ? updated : t)),
+        activityLogs: withLog(state.activityLogs, action.log),
+      };
+    }
+    case 'TASK_DECLINE': {
+      const now = new Date().toISOString();
+      return {
+        ...state,
+        tasks: state.tasks.map((t) =>
+          t.id === action.id
+            ? { ...t, declinedBy: state.currentUserId, declinedReason: action.reason, declinedAt: now, updatedAt: now }
+            : t,
+        ),
+        activityLogs: withLog(state.activityLogs, action.log),
+      };
+    }
+    case 'TASK_AUTO_ACCEPT': {
+      const task = state.tasks.find((t) => t.id === action.id);
+      if (!task) return state;
+      const updated: Task = {
+        ...task,
+        status: 'in_progress',
+        updatedAt: new Date().toISOString(),
+        completedAt: undefined,
+        declinedBy: undefined,
+        declinedReason: undefined,
+        declinedAt: undefined,
       };
       return {
         ...state,
@@ -354,6 +409,36 @@ interface AppContextValue {
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
+
+/** Sau 12h kể từ lúc giao mà không phản hồi thì mặc định task được thực hiện. */
+export const AUTO_ACCEPT_MS = 12 * 60 * 60 * 1000;
+
+/** Task đang chờ phản hồi đã quá 12h kể từ lúc giao. */
+export function findAutoAcceptTasks(tasks: Task[], now = Date.now()): Task[] {
+  return tasks.filter(
+    (t) =>
+      t.status === 'todo' &&
+      t.assignedAt &&
+      !t.declinedBy &&
+      t.assigneeIds.length > 0 &&
+      now - new Date(t.assignedAt).getTime() > AUTO_ACCEPT_MS,
+  );
+}
+
+/**
+ * Chạy kiểm tra tự động nhận. Lũy đẳng: task đã sang 'in_progress' thì lần
+ * sau không khớp nữa. Dừng ở lỗi đầu tiên để không spam toast.
+ */
+export async function runAutoAcceptCheck(
+  tasks: Task[],
+  dispatch: (a: Action) => Promise<boolean>,
+): Promise<void> {
+  const overdue = findAutoAcceptTasks(tasks);
+  for (const t of overdue) {
+    const ok = await dispatch({ type: 'TASK_AUTO_ACCEPT', id: t.id });
+    if (!ok) break;
+  }
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, baseDispatch] = useReducer(reducer, undefined, emptyState);
@@ -693,6 +778,9 @@ function assertProjectMembership(state: AppState, action: Action): void {
   } else if (action.type === 'TASK_MOVE' || action.type === 'TASK_DELETE') {
     const task = state.tasks.find((t) => t.id === action.id);
     targetProjectId = task?.projectId;
+  } else if (action.type === 'TASK_DECLINE') {
+    const task = state.tasks.find((t) => t.id === action.id);
+    targetProjectId = task?.projectId;
   } else if (action.type === 'TASK_UPDATE') {
     targetProjectId = action.task.projectId;
   } else if (action.type === 'DEPENDENCY_ADD') {
@@ -712,6 +800,11 @@ function assertProjectMembership(state: AppState, action: Action): void {
     targetProjectId = task?.projectId;
   } else if (action.type === 'PROJECT_UPDATE') {
     targetProjectId = action.project.id;
+  } else if (action.type === 'PROJECT_INVITE_MEMBER') {
+    targetProjectId = action.projectId;
+  } else if (action.type === 'PROJECT_INVITE_CANCEL') {
+    const req = state.projectRequests.find((r) => r.id === action.id);
+    targetProjectId = req?.projectId;
   }
 
   if (!targetProjectId) return;
@@ -724,6 +817,11 @@ function assertProjectMembership(state: AppState, action: Action): void {
 
   if (action.type === 'PROJECT_UPDATE' && !isLeader) {
     throw new Error('Chỉ Admin hoặc Chủ dự án mới được chỉnh sửa dự án này.');
+  }
+
+  // Mời thành viên / hủy lời mời: chỉ Leader của dự án (Admin đã bypass ở đầu hàm).
+  if ((action.type === 'PROJECT_INVITE_MEMBER' || action.type === 'PROJECT_INVITE_CANCEL') && !isLeader) {
+    throw new Error('Chỉ Admin hoặc Chủ dự án mới được mời/hủy lời mời thành viên.');
   }
 
   // Tạo / xóa nhiệm vụ và thêm/gỡ nhiệm vụ phụ thuộc: chỉ Leader.
@@ -764,6 +862,14 @@ function assertProjectMembership(state: AppState, action: Action): void {
     }
   }
 
+  // Từ chối nhận: chỉ người được giao nhiệm vụ đó mới được từ chối.
+  if (action.type === 'TASK_DECLINE' && !isLeader) {
+    const task = state.tasks.find((t) => t.id === action.id);
+    if (!task || !task.assigneeIds.includes(state.currentUserId)) {
+      throw new Error('Chỉ người được giao nhiệm vụ mới được từ chối.');
+    }
+  }
+
   if (!isLeader && !isMember) {
     throw new Error('Bạn không phải thành viên của dự án này nên không có quyền thao tác.');
   }
@@ -782,14 +888,20 @@ function assertProjectPermission(state: AppState, action: Action): void {
   const isSuperAdmin = me?.isSuperAdmin ?? false;
 
   // Duyệt / từ chối yêu cầu: Admin (hoặc Admin tổng) duyệt mọi loại yêu cầu;
-  // riêng đơn xin tham gia dự án (`join_project`) do Leader của dự án đó duyệt.
+  // riêng đơn xin tham gia dự án (`join_project`) do Leader của dự án đó duyệt,
+  // còn lời mời vào dự án (`invite_member`) do chính người được mời duyệt.
   if (action.type === 'PROJECT_REQUEST_REVIEW' && !canReviewProjectRequests(role, isSuperAdmin)) {
     const req = state.projectRequests.find((r) => r.id === action.id);
     const proj = req?.projectId ? state.projects.find((p) => p.id === req.projectId) : undefined;
     const isJoinLeader = req?.type === 'join_project' && proj?.managerId === state.currentUserId;
-    if (!isJoinLeader) {
+    const isInvitee = req?.type === 'invite_member' && req.payload.invitee_id === state.currentUserId;
+    if (!isJoinLeader && !isInvitee) {
       throw new Error('Chỉ Admin mới được duyệt yêu cầu.');
     }
+  }
+  // Cấu hình workspace (thời hạn lời mời): chỉ Admin.
+  if (action.type === 'WORKSPACE_UPDATE_SETTINGS' && !canDirectProjectAction(role, isSuperAdmin)) {
+    throw new Error('Chỉ Admin mới được đổi cấu hình.');
   }
   // Member gửi yêu cầu tạo dự án; yêu cầu tạm dừng/xóa (nếu còn) phải là Leader của dự án đó.
   if (action.type === 'PROJECT_REQUEST_CREATE') {
@@ -855,6 +967,13 @@ function assertMemberPermission(state: AppState, action: Action): void {
       return false;
     }
   }, []);
+
+  // Tự động nhận task sau 12h không phản hồi — chạy khi dữ liệu thay đổi
+  // (tải xong, realtime cập nhật, hoặc chính lần tự nhận trước đó đổi trạng thái).
+  useEffect(() => {
+    if (state.tasks.length === 0) return;
+    void runAutoAcceptCheck(state.tasks, dispatch);
+  }, [state.tasks, dispatch]);
 
   const signOut = useCallback(async () => {
     try {
