@@ -71,25 +71,24 @@ export function SettingsPage() {
 
   const [prefs, setPrefs] = useState<NotifPrefs>(loadPrefs);
 
-  function saveProfile() {
+  async function saveProfile() {
     const n = name.trim();
     if (!n) {
       setProfileError('Vui lòng nhập tên hiển thị.');
       return;
     }
-    dispatch({ type: 'USER_UPDATE_PROFILE', id: me.id, name: n, title: title.trim() });
-    toast('Đã cập nhật hồ sơ', 'Thông tin cá nhân của bạn đã được lưu.');
+    const ok = await dispatch({ type: 'USER_UPDATE_PROFILE', id: me.id, name: n, title: title.trim() });
+    if (ok) toast('Đã cập nhật hồ sơ', 'Thông tin cá nhân của bạn đã được lưu.');
   }
 
-  function saveWorkspace() {
+  async function saveWorkspace() {
     const n = wsName.trim();
     if (!n) {
       setWsError('Vui lòng nhập tên workspace.');
       return;
     }
-    void dispatch({ type: 'WORKSPACE_UPDATE', name: n, timezone: wsTz }).then(() => {
-      toast('Đã cập nhật workspace', `Workspace "${n}" đã được lưu.`);
-    });
+    const ok = await dispatch({ type: 'WORKSPACE_UPDATE', name: n, timezone: wsTz });
+    if (ok) toast('Đã cập nhật workspace', `Workspace "${n}" đã được lưu.`);
   }
 
   function togglePref(key: keyof NotifPrefs, v: boolean) {

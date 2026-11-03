@@ -11,7 +11,7 @@ import { Input, Textarea, Field } from '../../components/ui/input';
 import { Dialog, DialogHeader, DialogBody, DialogFooter } from '../../components/ui/dialog';
 import { Avatar } from '../../components/ui/avatar';
 import { toast } from '../../components/ui/toast';
-import { timeAgo, fmtDate } from '../../lib/format';
+import { timeAgo, fmtDate, formatBytes } from '../../lib/format';
 import {
   PROJECT_DOC_ACCEPT, PROJECT_DOC_MAX_BYTES,
   getProjectDocumentUrl, uploadProjectDocumentFile,
@@ -27,13 +27,6 @@ interface FormState {
 function previewOf(content: string, len = 140): string {
   const oneLine = content.replace(/\s+/g, ' ').trim();
   return oneLine.length > len ? `${oneLine.slice(0, len)}…` : oneLine;
-}
-
-function formatFileSize(bytes?: number): string {
-  if (bytes == null) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function fileIcon(doc: Document) {
@@ -108,26 +101,26 @@ export function ProjectDocuments({ projectId }: { projectId: string }) {
     setForm({ mode: 'edit', doc });
   }
 
-  function handleSave() {
+  async function handleSave() {
     const t = title.trim();
     if (!t) {
       setError('Vui lòng nhập tiêu đề tài liệu.');
       return;
     }
     if (form?.mode === 'create') {
-      dispatch({ type: 'DOC_ADD', title: t, content, projectId });
-      toast('Đã tạo tài liệu', `Tài liệu "${t}" đã được tạo.`);
+      const ok = await dispatch({ type: 'DOC_ADD', title: t, content, projectId });
+      if (ok) toast('Đã tạo tài liệu', `Tài liệu "${t}" đã được tạo.`);
     } else if (form?.doc) {
-      dispatch({ type: 'DOC_UPDATE', id: form.doc.id, title: t, content });
-      toast('Đã cập nhật tài liệu', `Tài liệu "${t}" đã được lưu.`);
+      const ok = await dispatch({ type: 'DOC_UPDATE', id: form.doc.id, title: t, content });
+      if (ok) toast('Đã cập nhật tài liệu', `Tài liệu "${t}" đã được lưu.`);
     }
     setForm(null);
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!deleting) return;
-    dispatch({ type: 'DOC_DELETE', id: deleting.id });
-    toast('Đã xóa tài liệu', `Tài liệu "${deleting.title}" đã bị xóa.`);
+    const ok = await dispatch({ type: 'DOC_DELETE', id: deleting.id });
+    if (ok) toast('Đã xóa tài liệu', `Tài liệu "${deleting.title}" đã bị xóa.`);
     if (viewId === deleting.id) setViewId(null);
     setDeleteId(null);
   }
@@ -323,7 +316,7 @@ export function ProjectDocuments({ projectId }: { projectId: string }) {
                     <h3 className="line-clamp-2 font-semibold leading-snug">{d.title}</h3>
                     {isFile ? (
                       <p className="mt-2 text-sm text-muted-foreground">
-                        {formatFileSize(d.fileSize)}
+                        {formatBytes(d.fileSize)}
                         {d.fileType ? ` · ${d.fileType.split('/').pop()}` : ''}
                       </p>
                     ) : (

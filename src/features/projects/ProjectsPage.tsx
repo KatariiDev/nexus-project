@@ -35,6 +35,7 @@ import { Badge, PriorityBadge, ProjectStatusBadge } from '../../components/ui/ba
 import { Field, Input, Select } from '../../components/ui/input';
 import { Avatar, AvatarStack } from '../../components/ui/avatar';
 import { Progress } from '../../components/ui/progress';
+import { ProjectColorBar } from '../../components/ui/color-dot';
 import { Tabs } from '../../components/ui/tabs';
 import { ConfirmDialog, EmptyState, PageHeader } from '../../components/ui/feedback';
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../components/ui/dialog';
@@ -148,22 +149,23 @@ export function ProjectsPage() {
     };
   };
 
-  const requestJoin = (p: Project) => {
-    void dispatch({ type: 'PROJECT_JOIN_REQUEST', projectId: p.id }).then(() => {
+  const requestJoin = async (p: Project) => {
+    const ok = await dispatch({ type: 'PROJECT_JOIN_REQUEST', projectId: p.id });
+    if (ok) {
       setJoinRequested((s) => (s.includes(p.id) ? s : [...s, p.id]));
       toast('Đã gửi yêu cầu tham gia', `Chủ dự án "${p.name}" sẽ duyệt yêu cầu của bạn.`);
-    });
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteId) return;
     const target = state.projects.find((p) => p.id === deleteId);
     if (isAdmin) {
-      dispatch({ type: 'PROJECT_DELETE', id: deleteId });
-      toast('Đã xóa dự án', target?.name, 'success');
+      const ok = await dispatch({ type: 'PROJECT_DELETE', id: deleteId });
+      if (ok) toast('Đã xóa dự án', target?.name, 'success');
     } else {
       // Chủ dự án: gửi yêu cầu để Admin phê duyệt.
-      dispatch({
+      const ok = await dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
           id: newId(),
@@ -176,15 +178,15 @@ export function ProjectsPage() {
           createdAt: new Date().toISOString(),
         },
       });
-      toast('Đã gửi yêu cầu xóa dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
+      if (ok) toast('Đã gửi yêu cầu xóa dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
     }
     setDeleteId(null);
   };
 
-  const toggleArchive = (project: Project) => {
+  const toggleArchive = async (project: Project) => {
     const archived = project.status === 'archived';
-    dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: archived ? 'active' : 'archived' } });
-    toast(archived ? 'Đã kích hoạt dự án' : 'Đã lưu trữ dự án', project.name);
+    const ok = await dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: archived ? 'active' : 'archived' } });
+    if (ok) toast(archived ? 'Đã kích hoạt dự án' : 'Đã lưu trữ dự án', project.name);
   };
 
   return (
@@ -369,7 +371,7 @@ export function ProjectsPage() {
                     <tr key={p.id} onClick={() => navigate(`/user/projects/${p.id}`)} className="cursor-pointer border-b last:border-0 hover:bg-accent/50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
-                          <span className="h-8 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />
+                          <ProjectColorBar color={p.color} />
                           <span className="font-medium">{p.name}</span>
                         </div>
                       </td>
@@ -850,18 +852,18 @@ export function ProjectDetailPage() {
   ];
   const effectiveTab = visibleTabs.some((t) => t.value === tab) ? tab : 'overview';
 
-  const toggleArchive = () => {
-    dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: archived ? 'active' : 'archived' } });
-    toast(archived ? 'Đã kích hoạt dự án' : 'Đã lưu trữ dự án', project.name);
+  const toggleArchive = async () => {
+    const ok = await dispatch({ type: 'PROJECT_UPDATE', project: { ...project, status: archived ? 'active' : 'archived' } });
+    if (ok) toast(archived ? 'Đã kích hoạt dự án' : 'Đã lưu trữ dự án', project.name);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (isAdmin) {
-      dispatch({ type: 'PROJECT_DELETE', id: project.id });
-      toast('Đã xóa dự án', project.name, 'success');
+      const ok = await dispatch({ type: 'PROJECT_DELETE', id: project.id });
+      if (ok) toast('Đã xóa dự án', project.name, 'success');
     } else {
       // Chủ dự án: gửi yêu cầu để Admin phê duyệt.
-      dispatch({
+      const ok = await dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
           id: newId(),
@@ -874,36 +876,38 @@ export function ProjectDetailPage() {
           createdAt: new Date().toISOString(),
         },
       });
-      toast('Đã gửi yêu cầu xóa dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
+      if (ok) toast('Đã gửi yêu cầu xóa dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
     }
     setConfirmDelete(false);
     navigate('/user/projects');
   };
 
   /** Chỉ Chủ dự án + Admin được đổi trạng thái trực tiếp (tạm dừng/tiếp tục). */
-  const togglePause = () => {
+  const togglePause = async () => {
     const paused = project.status === 'paused';
-    dispatch({
+    const ok = await dispatch({
       type: 'PROJECT_UPDATE',
       project: { ...project, status: paused ? 'active' : 'paused', updatedAt: new Date().toISOString() },
     });
-    toast(paused ? 'Đã tiếp tục dự án' : 'Đã tạm dừng dự án', project.name);
+    if (ok) toast(paused ? 'Đã tiếp tục dự án' : 'Đã tạm dừng dự án', project.name);
   };
 
-  const requestJoin = () => {
-    void dispatch({ type: 'PROJECT_JOIN_REQUEST', projectId: project.id }).then(() => {
+  const requestJoin = async () => {
+    const ok = await dispatch({ type: 'PROJECT_JOIN_REQUEST', projectId: project.id });
+    if (ok) {
       setJoinRequested(true);
       toast('Đã gửi yêu cầu tham gia', `Chủ dự án "${project.name}" sẽ duyệt yêu cầu của bạn.`);
-    });
+    }
   };
 
   /** Leader duyệt / từ chối một đơn xin tham gia dự án. */
-  const reviewJoin = (approve: boolean) => {
+  const reviewJoin = async (approve: boolean) => {
     if (!joinReview) return;
     setJoinBusy(true);
     const req = joinReview;
-    void dispatch({ type: 'PROJECT_REQUEST_REVIEW', id: req.id, approve })
-      .then(() => {
+    try {
+      const ok = await dispatch({ type: 'PROJECT_REQUEST_REVIEW', id: req.id, approve });
+      if (ok) {
         const requester = userById(state.users, req.requestedBy);
         toast(
           approve ? 'Đã cho phép tham gia dự án' : 'Đã từ chối yêu cầu tham gia',
@@ -912,8 +916,10 @@ export function ProjectDetailPage() {
             : `Đã từ chối ${requester?.name ?? 'người xin tham gia'} vào dự án "${project.name}".`,
         );
         setJoinReview(null);
-      })
-      .finally(() => setJoinBusy(false));
+      }
+    } finally {
+      setJoinBusy(false);
+    }
   };
 
   /** Chấp nhận / từ chối lời mời vào dự án (chỉ người được mời thấy banner). */
@@ -955,7 +961,7 @@ export function ProjectDetailPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-1 h-10 w-2 shrink-0 rounded-full" style={{ backgroundColor: project.color }} />
+          <ProjectColorBar color={project.color} className="mt-1 h-10 w-2" />
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight">{project.name}</h1>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
