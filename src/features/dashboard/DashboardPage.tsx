@@ -76,7 +76,11 @@ export function DashboardPage() {
   );
 
   const stats = useMemo(() => {
-    const activeProjects = visibleProjectsList.filter((p) => p.status === 'active').length;
+    // "Dự án đang hoạt động" = dự án người dùng đã tham gia (Member: dự án
+    // đã join; Admin: tất cả dự án trong workspace) — không tính theo trạng
+    // thái, vì dự án mới tạo luôn ở trạng thái "Lập kế hoạch" nên đếm theo
+    // status 'active' thì thẻ này luôn hiện 0.
+    const activeProjects = visibleProjectsList.length;
     const totalTasks = visibleTasks.length;
     const doneTasks = visibleTasks.filter((t) => t.status === 'done').length;
     const overdueTasks = visibleTasks.filter((t) => isOverdue(t.dueDate, t.status)).length;
