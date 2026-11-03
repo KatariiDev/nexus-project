@@ -15,7 +15,7 @@ import type { Priority, Project, ProjectStatus } from '../../types';
 
 const SWATCHES = ['#4F46E5', '#0284C7', '#16A34A', '#F59E0B', '#EF4444', '#A855F7'];
 
-export interface ProjectFormProps {
+interface ProjectFormProps {
   open: boolean;
   onClose: () => void;
   initial?: Project;
