@@ -57,3 +57,16 @@ export function addDaysISO(base: Date, days: number): string {
   d.setDate(d.getDate() + days);
   return toISODate(d);
 }
+
+/** Đếm ngược tới một thời điểm hết hạn: "Còn 2 ngày 4 giờ" / "Còn 5 giờ 20 phút" / "Đã hết hạn". */
+export function formatCountdown(expiresAt: string, now: Date = new Date()): string {
+  const diffMs = new Date(expiresAt).getTime() - now.getTime();
+  if (diffMs <= 0) return 'Đã hết hạn';
+  const totalMinutes = Math.floor(diffMs / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `Còn ${days} ngày${hours > 0 ? ` ${hours} giờ` : ''}`;
+  if (hours > 0) return `Còn ${hours} giờ${minutes > 0 ? ` ${minutes} phút` : ''}`;
+  return `Còn ${minutes} phút`;
+}

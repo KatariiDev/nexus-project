@@ -80,7 +80,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
             status: 'planning',
             priority: 'medium',
             managerId: me.id,
-            memberIds: [me.id],
+            memberIds: [],
             startDate: today,
             endDate: addDaysISO(new Date(), 30).slice(0, 10),
             budget: '',
@@ -101,6 +101,13 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
     setForm((f) =>
       f ? { ...f, memberIds: f.memberIds.includes(id) ? f.memberIds.filter((m) => m !== id) : [...f.memberIds, id] } : f,
     );
+  };
+
+  // Đổi Chủ dự án thì người mới làm Chủ sẽ biến khỏi danh sách Thành viên
+  // (đang tick thì bỏ tick); người cũ quay lại danh sách chọn.
+  const setManager = (id: string) => {
+    setForm((f) => (f ? { ...f, managerId: id, memberIds: f.memberIds.filter((m) => m !== id) } : f));
+    setErrors((e) => ({ ...e, managerId: undefined }));
   };
 
   const validate = (): boolean => {
@@ -244,7 +251,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
         <Field label="Chủ dự án (Leader) *" error={errors.managerId}>
           <Select
             value={form.managerId}
-            onChange={(e) => set('managerId', e.target.value)}
+            onChange={(e) => setManager(e.target.value)}
             disabled={managerLocked}
             title={managerLocked ? 'Bạn là Chủ dự án khi gửi yêu cầu tạo dự án' : undefined}
           >
@@ -270,6 +277,8 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
           <div className="max-h-44 overflow-y-auto rounded-md border border-input p-2">
             {state.users
               .filter((u) => {
+                // Chủ dự án không nằm trong danh sách Thành viên (đã là Leader của dự án).
+                if (u.id === form.managerId) return false;
                 const q = memberQuery.trim().toLowerCase();
                 if (!q) return true;
                 return `${u.name} ${u.email} ${u.title || ''}`.toLowerCase().includes(q);
@@ -285,6 +294,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
                 </label>
               ))}
             {state.users.filter((u) => {
+              if (u.id === form.managerId) return false;
               const q = memberQuery.trim().toLowerCase();
               return q && `${u.name} ${u.email} ${u.title || ''}`.toLowerCase().includes(q);
             }).length === 0 && memberQuery.trim() !== '' && (

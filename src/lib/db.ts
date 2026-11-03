@@ -15,6 +15,7 @@ import type {
   Label,
   Notification,
   Project,
+  ProjectInvitePayload,
   ProjectRequest,
   Task,
   TaskAttachment,
@@ -45,6 +46,7 @@ interface DbWorkspace {
   id: string;
   name: string;
   timezone: string | null;
+  invite_expiry_days: number | null;
 }
 interface DbWorkspaceMember {
   workspace_id: string;
@@ -338,8 +340,8 @@ export async function loadWorkspaceData(
   for (const u of finalUsers) u.workload = Math.min(100, (openCount.get(u.id) ?? 0) * 10);
 
   return {
-    workspace: { id: ws.id, name: ws.name, timezone: ws.timezone ?? 'Asia/Ho_Chi_Minh' },
-    workspaces: wsList.map((w) => ({ id: w.id, name: w.name, timezone: w.timezone ?? 'Asia/Ho_Chi_Minh' })),
+    workspace: { id: ws.id, name: ws.name, timezone: ws.timezone ?? 'Asia/Ho_Chi_Minh', inviteExpiryDays: ws.invite_expiry_days ?? undefined },
+    workspaces: wsList.map((w) => ({ id: w.id, name: w.name, timezone: w.timezone ?? 'Asia/Ho_Chi_Minh', inviteExpiryDays: w.invite_expiry_days ?? undefined })),
     users: finalUsers,
     labels: ((labelsRes.data ?? []) as { id: string; name: string; color: string }[]).map((l) => ({
       id: l.id, name: l.name, color: l.color,
@@ -392,7 +394,7 @@ export async function loadWorkspaceData(
         workspaceId: r.workspace_id,
         type: r.type as ProjectRequest['type'],
         projectId: r.project_id ?? undefined,
-        payload: (r.payload ?? {}) as Partial<Project>,
+        payload: (r.payload ?? {}) as Partial<Project> & Partial<ProjectInvitePayload>,
         status: r.status as ProjectRequest['status'],
         requestedBy: r.requested_by,
         reviewedBy: r.reviewed_by ?? undefined,
@@ -489,6 +491,7 @@ export type RichAction = Action & {
   task?: Task;
   project?: Project;
   request?: ProjectRequest;
+  requests?: ProjectRequest[];
   projectDeletedId?: string;
 };
 
@@ -527,6 +530,8 @@ function requestTitle(
       return `Xóa dự án${name}`;
     case 'join_project':
       return `Xin tham gia dự án${name}`;
+    case 'invite_member':
+      return `Mời vào dự án${name}`;
   }
 }
 
@@ -787,6 +792,82 @@ export async function persistAction(
       return { ...action, log };
     }
 
+    case 'PROJECT_INVITE_MEMBER': {
+      const project = state.projects.find((p) => p.id === action.projectId);
+      if (!project) throwDb(new Error('not found'), 'Không tìm thấy dự án.');
+      const expiryDays = state.workspace.inviteExpiryDays ?? 3;
+      const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
+      const now = new Date().toISOString();
+      // Lọc bỏ người đã là thành viên hoặc đang có lời mời chờ xử lý.
+      const pendingInviteeIds = new Set(
+        state.projectRequests
+          .filter((r) => r.type === 'invite_member' && r.projectId === project.id && r.status === 'pending')
+          .map((r) => r.payload.invitee_id)
+          .filter((id): id is string => typeof id === 'string'),
+      );
+      const inviteeIds = [...new Set(action.inviteeIds)].filter(
+        (id) => !project.memberIds.includes(id) && id !== project.managerId && !pendingInviteeIds.has(id),
+      );
+      if (inviteeIds.length === 0) throw new Error('Không còn ai để mời (đã là thành viên hoặc đang chờ chấp nhận).');
+      const requests: ProjectRequest[] = inviteeIds.map((inviteeId) => ({
+        id: newId(),
+        workspaceId: ctx.workspaceId,
+        type: 'invite_member' as const,
+        projectId: project.id,
+        payload: { invitee_id: inviteeId, expires_at: expiresAt },
+        status: 'pending' as const,
+        requestedBy: ctx.userId,
+        createdAt: now,
+      }));
+      const { error: rErr } = await sb.from('project_requests').insert(
+        requests.map((r) => ({
+          id: r.id,
+          workspace_id: ctx.workspaceId,
+          type: 'invite_member',
+          project_id: project.id,
+          payload: { invitee_id: r.payload.invitee_id, expires_at: expiresAt },
+          status: 'pending',
+          requested_by: ctx.userId,
+        })),
+      );
+      if (rErr) throwDb(rErr, 'Không gửi được lời mời. Hãy kiểm tra đã chạy file SQL nexus-project-invites-db.sql chưa.');
+      const { error: nErr } = await sb.from('notifications').insert(
+        inviteeIds.map((inviteeId) => ({
+          id: newId(),
+          user_id: inviteeId,
+          kind: 'invite',
+          title: 'Bạn được mời vào dự án',
+          body: `${ctx.userName} mời bạn vào dự án "${project.name}". Lời mời hết hạn sau ${expiryDays} ngày.`,
+          link: `/user/projects/${project.id}`,
+        })),
+      );
+      if (nErr) throwDb(nErr, 'Không gửi được thông báo mời. Hãy kiểm tra đã chạy file SQL nexus-project-invites-db.sql chưa.');
+      return { ...action, requests };
+    }
+
+    case 'PROJECT_INVITE_CANCEL': {
+      const req = state.projectRequests.find((x) => x.id === action.id);
+      if (!req) throwDb(new Error('not found'), 'Không tìm thấy lời mời.');
+      if (req.type !== 'invite_member') throw new Error('Đây không phải lời mời vào dự án.');
+      if (req.status !== 'pending') throwDb(new Error('already reviewed'), 'Lời mời đã được xử lý trước đó.');
+      const { error } = await sb.from('project_requests').delete().eq('id', action.id);
+      if (error) throwDb(error, 'Không hủy được lời mời.');
+      const proj = req.projectId ? state.projects.find((p) => p.id === req.projectId) : undefined;
+      const invitee = state.users.find((u) => u.id === req.payload.invitee_id);
+      const log = buildLog(ctx, `đã hủy lời mời ${invitee?.name ?? 'thành viên'} vào dự án`, 'project', proj?.id ?? req.id, proj?.name ?? '');
+      await insertLog(sb, ctx, log);
+      return { ...action, log };
+    }
+
+    case 'WORKSPACE_UPDATE_SETTINGS': {
+      const { error } = await sb
+        .from('workspaces')
+        .update({ invite_expiry_days: action.inviteExpiryDays })
+        .eq('id', ctx.workspaceId);
+      if (error) throwDb(error, 'Không lưu được cấu hình. Hãy kiểm tra đã chạy file SQL nexus-project-invites-db.sql chưa.');
+      return action;
+    }
+
     case 'PROJECT_REQUEST_REVIEW': {
       const req = state.projectRequests.find((x) => x.id === action.id);
       if (!req) throwDb(new Error('not found'), 'Không tìm thấy yêu cầu.');
@@ -837,6 +918,19 @@ export async function persistAction(
         }
         await syncJoin(sb, 'project_members', 'project_id', project.id, 'user_id', [], project.memberIds);
         createdProject = project;
+      }
+
+      // Lời mời vào dự án: người được mời tự chấp nhận — họ không sửa được
+      // bảng projects/project_members theo RLS nên gọi hàm security definer
+      // accept_project_invite (chỉ chèn vào project_members). Làm TRƯỚC khi
+      // đổi trạng thái đơn để lỗi thì đơn vẫn ở "pending", duyệt lại được.
+      if (action.approve && req.type === 'invite_member') {
+        const expiresAt = req.payload.expires_at;
+        if (!expiresAt || new Date(expiresAt).getTime() <= Date.now()) {
+          throw new Error('Lời mời đã hết hạn. Hãy nhờ Leader hoặc Admin mời lại.');
+        }
+        const { error: rpcErr } = await sb.rpc('accept_project_invite', { p_request_id: req.id });
+        if (rpcErr) throwDb(rpcErr, 'Không chấp nhận được lời mời. Hãy kiểm tra đã chạy file SQL nexus-project-invites-db.sql chưa.');
       }
 
       const { error } = await sb
@@ -890,6 +984,16 @@ export async function persistAction(
             executedLog = buildLog(ctx, `đã cho phép ${requester?.name ?? 'thành viên mới'} tham gia`, 'project', proj.id, proj.name);
             await insertLog(sb, ctx, executedLog);
           }
+        } else if (req.type === 'invite_member' && req.projectId) {
+          // Người được mời đã vào dự án qua hàm accept_project_invite (xem phía trên);
+          // ở đây chỉ cập nhật state + ghi log.
+          const proj = state.projects.find((x) => x.id === req.projectId);
+          const inviteeId = req.payload.invitee_id;
+          if (proj && typeof inviteeId === 'string' && !proj.memberIds.includes(inviteeId)) {
+            reviewedProject = { ...proj, memberIds: [...proj.memberIds, inviteeId], updatedAt: now };
+            executedLog = buildLog(ctx, 'đã chấp nhận lời mời tham gia', 'project', proj.id, proj.name);
+            await insertLog(sb, ctx, executedLog);
+          }
         }
       }
 
@@ -899,6 +1003,15 @@ export async function persistAction(
         if (proj) {
           const requester = state.users.find((u) => u.id === req.requestedBy);
           executedLog = buildLog(ctx, `đã từ chối ${requester?.name ?? 'thành viên mới'} tham gia`, 'project', proj.id, proj.name);
+          await insertLog(sb, ctx, executedLog);
+        }
+      }
+
+      // Từ chối lời mời vào dự án: ghi lại vào Hoạt động của dự án.
+      if (!action.approve && req.type === 'invite_member' && req.projectId) {
+        const proj = state.projects.find((x) => x.id === req.projectId);
+        if (proj) {
+          executedLog = buildLog(ctx, 'đã từ chối lời mời tham gia', 'project', proj.id, proj.name);
           await insertLog(sb, ctx, executedLog);
         }
       }

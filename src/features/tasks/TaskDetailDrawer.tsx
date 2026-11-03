@@ -355,16 +355,6 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
               </dd>
             </div>
             <div>
-              <dt className="flex items-center gap-1 text-xs text-muted-foreground"><Timer className="h-3.5 w-3.5" />Giờ ước tính</dt>
-              <dd className="mt-1">
-                {canEdit ? (
-                  <Input type="number" min={0} step={0.5} value={task.estimateHours ?? ''} onChange={(e) => update({ estimateHours: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} />
-                ) : (
-                  <span className="text-sm">{task.estimateHours != null ? `${task.estimateHours} giờ` : '—'}</span>
-                )}
-              </dd>
-            </div>
-            <div>
               <dt className="flex items-center gap-1 text-xs text-muted-foreground"><Timer className="h-3.5 w-3.5" />Giờ thực tế</dt>
               <dd className="mt-1">
                 {canEdit ? (
