@@ -141,12 +141,12 @@ export function ProjectDetailPage() {
   const deleteMode = (isAdmin ? 'direct' : isLeader ? 'request' : 'none') as 'direct' | 'request' | 'none';
   const docs = state.documents.filter((d) => d.projectId === project.id);
 
-  // Người chưa tham gia chỉ xem được Tổng quan + Nhiệm vụ (ẩn Hoạt động + Tài liệu).
+  // Người chưa tham gia chỉ xem được Tổng quan (ẩn Nhiệm vụ + Tài liệu + Hoạt động).
   const visibleTabs: { value: DetailTab; label: string }[] = [
     { value: 'overview', label: 'Tổng quan' },
-    { value: 'tasks', label: `Nhiệm vụ (${tasks.length})` },
     ...(isMember
       ? [
+          { value: 'tasks', label: `Nhiệm vụ (${tasks.length})` },
           { value: 'documents', label: `Tài liệu (${docs.length})` },
           { value: 'activity', label: `Hoạt động (${activities.length})` },
         ] as { value: DetailTab; label: string }[]
