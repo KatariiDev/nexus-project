@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Bell, Briefcase, CheckCheck, Clock, MessageSquare, UserPlus, Users, XCircle } from 'lucide-react';
+import { AlertTriangle, Bell, Briefcase, CheckCheck, Clock, MessageSquare, Send, UserPlus, Users, XCircle } from 'lucide-react';
 import { taskById, useApp, useCurrentUser } from '../../store/AppContext';
 import { useUI } from '../../components/layout/UIContext';
 import { EmptyState, PageHeader } from '../../components/ui/feedback';
@@ -23,6 +23,7 @@ const kindMeta: Record<Notification['kind'], { icon: React.ReactNode; tone: stri
   member: { icon: <Users className="h-4 w-4" />, tone: 'bg-purple-500/10 text-purple-600 dark:text-purple-400', label: 'Thành viên' },
   review: { icon: <CheckCheck className="h-4 w-4" />, tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', label: 'Chờ duyệt' },
   declined: { icon: <XCircle className="h-4 w-4" />, tone: 'bg-destructive/10 text-destructive', label: 'Từ chối nhiệm vụ' },
+  invite: { icon: <Send className="h-4 w-4" />, tone: 'bg-teal-500/10 text-teal-600 dark:text-teal-400', label: 'Lời mời vào dự án' },
 };
 
 export function NotificationsPage() {

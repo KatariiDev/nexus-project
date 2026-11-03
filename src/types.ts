@@ -24,6 +24,8 @@ export interface Workspace {
   id: string;
   name: string;
   timezone: string;
+  /** Số ngày hiệu lực của lời mời vào dự án mới (mặc định 3). */
+  inviteExpiryDays?: number;
 }
 
 export interface Project {
@@ -112,7 +114,7 @@ export interface TaskAttachment {
 export interface Notification {
   id: string;
   userId: string;
-  kind: 'assigned' | 'due_soon' | 'overdue' | 'comment' | 'project' | 'member' | 'review' | 'declined';
+  kind: 'assigned' | 'due_soon' | 'overdue' | 'comment' | 'project' | 'member' | 'review' | 'declined' | 'invite';
   title: string;
   body: string;
   link?: string;
@@ -121,8 +123,15 @@ export interface Notification {
 }
 
 /** Yêu cầu phê duyệt liên quan đến dự án (Member gửi → Admin duyệt; riêng `join_project` do Leader của dự án duyệt). */
-export type ProjectRequestType = 'create_project' | 'pause_project' | 'delete_project' | 'join_project';
+export type ProjectRequestType = 'create_project' | 'pause_project' | 'delete_project' | 'join_project' | 'invite_member';
 export type ProjectRequestStatus = 'pending' | 'approved' | 'rejected';
+
+/** Payload của lời mời vào dự án (chỉ dùng với invite_member). */
+export interface ProjectInvitePayload {
+  invitee_id: string;
+  /** Thời điểm lời mời hết hạn (ISO). */
+  expires_at: string;
+}
 
 export interface ProjectRequest {
   id: string;
@@ -130,8 +139,8 @@ export interface ProjectRequest {
   type: ProjectRequestType;
   /** Có giá trị với pause/delete; null với create (dự án chưa tồn tại). */
   projectId?: string;
-  /** Dữ liệu dự án muốn tạo (chỉ dùng với create_project). */
-  payload: Partial<Project>;
+  /** Dữ liệu dự án muốn tạo (chỉ dùng với create_project) hoặc dữ liệu lời mời (invite_member). */
+  payload: Partial<Project> & Partial<ProjectInvitePayload>;
   status: ProjectRequestStatus;
   requestedBy: string;
   reviewedBy?: string;
@@ -145,6 +154,7 @@ export const PROJECT_REQUEST_TYPES: { value: ProjectRequestType; label: string }
   { value: 'pause_project', label: 'Tạm dừng dự án' },
   { value: 'delete_project', label: 'Xóa dự án' },
   { value: 'join_project', label: 'Xin tham gia dự án' },
+  { value: 'invite_member', label: 'Mời vào dự án' },
 ];
 
 export function projectRequestTypeLabel(t: ProjectRequestType): string {

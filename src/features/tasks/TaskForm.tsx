@@ -25,10 +25,6 @@ const formSchema = z.object({
   startDate: z.string().default(''),
   dueDate: z.string().default(''),
   labelIds: z.array(z.string()).default([]),
-  estimateHours: z
-    .string()
-    .default('')
-    .refine((v) => v === '' || (!Number.isNaN(Number(v)) && Number(v) >= 0), 'Giờ ước tính phải là số lớn hơn hoặc bằng 0'),
 });
 
 type FormValues = z.input<typeof formSchema>;
@@ -55,7 +51,6 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
     startDate: isoToDateInput(initial?.startDate),
     dueDate: isoToDateInput(initial?.dueDate),
     labelIds: initial?.labelIds ?? [],
-    estimateHours: initial?.estimateHours !== undefined ? String(initial.estimateHours) : '',
   });
 
   const { register, control, handleSubmit, reset, watch, formState: { errors } } = useForm<FormValues>({
@@ -93,7 +88,6 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
     const status = data.status ?? 'todo';
     const priority = data.priority ?? 'medium';
     const labelIds = data.labelIds ?? [];
-    const estimateHours = !data.estimateHours ? undefined : Number(data.estimateHours);
     if (initial) {
       dispatch({
         type: 'TASK_UPDATE',
@@ -108,7 +102,6 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
           startDate: dateInputToISO(data.startDate ?? ''),
           dueDate: dateInputToISO(data.dueDate ?? ''),
           labelIds,
-          estimateHours,
         },
       });
       toast('Đã cập nhật nhiệm vụ', title);
@@ -127,7 +120,6 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
         startDate: dateInputToISO(data.startDate ?? ''),
         dueDate: dateInputToISO(data.dueDate ?? ''),
         labelIds,
-        estimateHours,
         createdAt: now,
         updatedAt: now,
       };
@@ -151,27 +143,16 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
           </Field>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Dự án" error={errors.projectId?.message}>
-              <Select {...register('projectId')}>
-                <option value="">— Chọn dự án —</option>
-                {visibleProjectsList.map((p) => (
-                  <option key={p.id} value={p.id}>{p.code} · {p.name}</option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Giờ ước tính" error={errors.estimateHours?.message}>
-              <Input {...register('estimateHours')} type="number" min={0} step={0.5} placeholder="0" />
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Trạng thái">
-              <Select {...register('status')}>
-                {TASK_STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </Select>
-            </Field>
+            {/* Tạo mới: nhiệm vụ luôn ở "Cần thực hiện", không cho chọn trạng thái. */}
+            {initial && (
+              <Field label="Trạng thái">
+                <Select {...register('status')}>
+                  {TASK_STATUSES.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Field label="Ưu tiên">
               <Select {...register('priority')}>
                 {PRIORITIES.map((p) => (
@@ -197,7 +178,7 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
               render={({ field }) => (
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   {projectMembers.length === 0 && (
-                    <p className="text-sm text-muted-foreground">Chọn dự án trước để xem thành viên.</p>
+                    <p className="text-sm text-muted-foreground">Chưa có thành viên nào trong dự án này.</p>
                   )}
                   {projectMembers.map((u) => {
                     const value = field.value ?? [];

@@ -9,7 +9,6 @@ import {
   FolderOpen,
   LayoutGrid,
   List,
-  Mail,
   MoreVertical,
   Pause,
   Pencil,
@@ -41,8 +40,7 @@ import { ConfirmDialog, EmptyState, PageHeader } from '../../components/ui/feedb
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../components/ui/dialog';
 import { Dropdown, DropdownItem, DropdownSeparator } from '../../components/ui/dropdown';
 import { toast } from '../../components/ui/toast';
-import { dueLabel, fmtDate, isOverdue, timeAgo } from '../../lib/format';
-import { getSupabase } from '../../lib/supabase';
+import { dueLabel, fmtDate, formatCountdown, isOverdue, timeAgo } from '../../lib/format';
 import { PRIORITIES, PROJECT_STATUSES } from '../../types';
 import type { Priority, Project, ProjectRequest, ProjectStatus, User } from '../../types';
 import { ProjectForm } from './ProjectForm';
@@ -586,97 +584,74 @@ function ProjectCard({
 
 /* ---------------- InviteMembersDialog ---------------- */
 
-/** Mời thành viên vào dự án: thêm người đã có trong workspace, hoặc mời bằng email (chỉ Admin). */
+/** Giờ hiện tại, cập nhật mỗi phút để đếm ngược lời mời chạy. */
+function useNow(intervalMs = 60000): Date {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+  return now;
+}
+
+/** Mời thành viên vào dự án: gửi lời mời, người được mời chấp nhận mới vào. */
 function InviteMembersDialog({ project, open, onClose }: { project: Project; open: boolean; onClose: () => void }) {
   const { state, dispatch } = useApp();
-  const me = useCurrentUser();
-  const isAdmin = canAccessAdmin(me.role, me.isSuperAdmin);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
-  const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
+  const now = useNow();
 
   useEffect(() => {
     if (open) {
       setQuery('');
       setSelected([]);
-      setEmail('');
     }
   }, [open ]);
+
+  // Lời mời đang chờ xử lý của dự án này.
+  const pendingInvites = useMemo(
+    () => state.projectRequests.filter((r) => r.type === 'invite_member' && r.projectId === project.id && r.status === 'pending'),
+    [state.projectRequests, project.id],
+  );
+  const pendingInviteeIds = useMemo(() => new Set(pendingInvites.map((r) => r.payload.invitee_id)), [pendingInvites]);
 
   const candidates = useMemo(() => {
     const q = query.trim().toLowerCase();
     return state.users.filter((u) => {
       if (project.memberIds.includes(u.id) || u.id === project.managerId) return false;
+      if (pendingInviteeIds.has(u.id)) return false;
       if (!q) return true;
       return `${u.name} ${u.email} ${u.title || ''}`.toLowerCase().includes(q);
     });
-  }, [state.users, project, query]);
+  }, [state.users, project, query, pendingInviteeIds]);
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
-  const addSelected = () => {
+  const sendInvites = () => {
     if (selected.length === 0) return;
     setBusy(true);
-    void dispatch({
-      type: 'PROJECT_UPDATE',
-      project: { ...project, memberIds: Array.from(new Set([...project.memberIds, ...selected])) },
-    }).then(() => {
-      toast('Đã thêm thành viên', `${selected.length} người đã tham gia dự án "${project.name}".`);
-      setSelected([]);
+    void dispatch({ type: 'PROJECT_INVITE_MEMBER', projectId: project.id, inviteeIds: selected }).then((ok) => {
       setBusy(false);
+      if (!ok) return;
+      toast('Đã gửi lời mời', `${selected.length} người sẽ nhận thông báo mời vào dự án "${project.name}".`);
+      setSelected([]);
       onClose();
     });
   };
 
-  const inviteByEmail = async () => {
-    const clean = email.trim().toLowerCase();
-    if (!/^\S+@\S+\.\S+$/.test(clean)) {
-      toast('Email không hợp lệ', 'Vui lòng nhập đúng định dạng email.', 'error');
-      return;
-    }
+  const cancelInvite = (id: string) => {
     setBusy(true);
-    try {
-      const sb = getSupabase();
-      const { data: profile } = await sb.from('profiles').select('id').ilike('email', clean).maybeSingle();
-      const profileId = (profile as { id: string } | null)?.id;
-      if (!profileId) {
-        toast('Không tìm thấy tài khoản', `Email ${clean} chưa đăng ký tài khoản Nexus. Người này cần đăng ký trước.`, 'error');
-        return;
-      }
-      if (profileId === me.id) {
-        toast('Không thể mời chính mình', 'Bạn đã ở trong dự án này rồi.', 'error');
-        return;
-      }
-      if (!state.users.some((u) => u.id === profileId)) {
-        await dispatch({ type: 'USER_ADD', email: clean, role: 'member' });
-        const { data: wm } = await sb
-          .from('workspace_members')
-          .select('user_id')
-          .eq('workspace_id', state.workspace.id)
-          .eq('user_id', profileId)
-          .maybeSingle();
-        if (!wm) {
-          toast('Không thêm được vào workspace', 'Vui lòng thử lại.', 'error');
-          return;
-        }
-      }
-      await dispatch({
-        type: 'PROJECT_UPDATE',
-        project: { ...project, memberIds: Array.from(new Set([...project.memberIds, profileId])) },
-      });
-      toast('Đã mời thành viên', `${clean} đã tham gia dự án "${project.name}".`);
-      setEmail('');
-      onClose();
-    } finally {
+    void dispatch({ type: 'PROJECT_INVITE_CANCEL', id }).then((ok) => {
       setBusy(false);
-    }
+      if (ok) toast('Đã hủy lời mời', 'Lời mời đã được hủy.');
+    });
   };
 
   return (
     <Dialog open={open} onClose={onClose} wide>
-      <DialogHeader title="Mời thành viên" desc={`Thêm thành viên vào dự án "${project.name}".`} onClose={onClose} />
+      <DialogHeader title="Mời thành viên" desc={`Người được mời sẽ nhận thông báo và chấp nhận mới vào dự án "${project.name}".`} onClose={onClose} />
       <DialogBody className="flex flex-col gap-4">
         <Field label="Tìm thành viên trong workspace">
           <div className="relative">
@@ -711,34 +686,39 @@ function InviteMembersDialog({ project, open, onClose }: { project: Project; ope
             </label>
           ))}
         </div>
-        {isAdmin && (
-          <Field label="Hoặc mời người mới bằng email">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="email@congty.vn"
-                  type="email"
-                />
-              </div>
-              <Button variant="outline" disabled={busy} onClick={() => void inviteByEmail()}>
-                Mời qua email
-              </Button>
+        {pendingInvites.length > 0 && (
+          <div>
+            <p className="mb-2 text-sm font-medium">Đang chờ chấp nhận ({pendingInvites.length})</p>
+            <div className="flex flex-col gap-1.5">
+              {pendingInvites.map((r) => {
+                const invitee = state.users.find((u) => u.id === r.payload.invitee_id);
+                const inviter = state.users.find((u) => u.id === r.requestedBy);
+                return (
+                  <div key={r.id} className="flex items-center gap-3 rounded-md border border-border px-2.5 py-2">
+                    <Avatar name={invitee?.name ?? 'Thành viên'} avatarUrl={invitee?.avatarUrl} size="xs" />
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      <span className="font-medium">{invitee?.name ?? 'Thành viên'}</span>
+                      <span className="text-muted-foreground">
+                        {' '}· {inviter?.name ?? '—'} mời · {r.payload.expires_at ? formatCountdown(r.payload.expires_at, now) : '—'}
+                      </span>
+                    </span>
+                    <Button variant="ghost" size="sm" disabled={busy} onClick={() => cancelInvite(r.id)}>
+                      Hủy
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">Người này phải đã đăng ký tài khoản Nexus trước; họ sẽ được thêm vào workspace rồi vào dự án.</p>
-          </Field>
+          </div>
         )}
       </DialogBody>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
           Hủy
         </Button>
-        <Button disabled={selected.length === 0 || busy} onClick={addSelected}>
+        <Button disabled={selected.length === 0 || busy} onClick={sendInvites}>
           <UserPlus className="h-4 w-4" />
-          Thêm {selected.length > 0 ? `${selected.length} thành viên` : 'vào dự án'}
+          Gửi lời mời{selected.length > 0 ? ` (${selected.length})` : ''}
         </Button>
       </DialogFooter>
     </Dialog>
@@ -766,6 +746,8 @@ export function ProjectDetailPage() {
   const [joinRequested, setJoinRequested] = useState(false);
   const [joinReview, setJoinReview] = useState<ProjectRequest | null>(null);
   const [joinBusy, setJoinBusy] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const now = useNow();
 
   const project = state.projects.find((p) => p.id === id);
 
@@ -811,6 +793,29 @@ export function ProjectDetailPage() {
   );
   /** Mình đã gửi đơn xin vào dự án này và đang chờ duyệt (tính từ đơn đã lưu). */
   const hasPendingJoin = joinRequests.some((r) => r.requestedBy === me.id);
+  /** Lời mời vào dự án này đang chờ mình chấp nhận/từ chối. */
+  const myInvite = useMemo(
+    () =>
+      state.projectRequests.find(
+        (r) =>
+          r.type === 'invite_member' &&
+          r.projectId === project.id &&
+          r.status === 'pending' &&
+          r.payload.invitee_id === me.id,
+      ),
+    [state.projectRequests, project.id, me.id],
+  );
+  const myInviteExpired = myInvite?.payload.expires_at
+    ? new Date(myInvite.payload.expires_at).getTime() <= now.getTime()
+    : false;
+  /** Lời mời vào dự án đang chờ xử lý (chỉ Leader/Admin thấy). */
+  const pendingInvites = useMemo(
+    () =>
+      state.projectRequests.filter(
+        (r) => r.type === 'invite_member' && r.projectId === project.id && r.status === 'pending',
+      ),
+    [state.projectRequests, project.id],
+  );
   const archived = project.status === 'archived';
 
   const isLeader = isProjectLeader(project, me.id);
@@ -901,6 +906,29 @@ export function ProjectDetailPage() {
       .finally(() => setJoinBusy(false));
   };
 
+  /** Chấp nhận / từ chối lời mời vào dự án (chỉ người được mời thấy banner). */
+  const reviewInvite = (approve: boolean) => {
+    if (!myInvite) return;
+    setInviteBusy(true);
+    void dispatch({ type: 'PROJECT_REQUEST_REVIEW', id: myInvite.id, approve }).then((ok) => {
+      setInviteBusy(false);
+      if (!ok) return;
+      toast(
+        approve ? 'Đã tham gia dự án' : 'Đã từ chối lời mời',
+        approve
+          ? `Bạn đã trở thành thành viên của dự án "${project.name}".`
+          : `Bạn đã từ chối lời mời vào dự án "${project.name}".`,
+      );
+    });
+  };
+
+  /** Leader/Admin hủy một lời mời đang chờ. */
+  const cancelInvite = (id: string) => {
+    void dispatch({ type: 'PROJECT_INVITE_CANCEL', id }).then((ok) => {
+      if (ok) toast('Đã hủy lời mời', 'Lời mời đã được hủy.');
+    });
+  };
+
   const stats = [
     { label: 'Tiến độ', value: `${progress}%`, extra: <Progress value={progress} className="mt-2" /> },
     { label: 'Tổng nhiệm vụ', value: String(tasks.length) },
@@ -966,6 +994,28 @@ export function ProjectDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Banner lời mời: chỉ người được mời thấy, còn hạn mới hiện. */}
+      {myInvite && !myInviteExpired && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3">
+          <UserPlus className="h-5 w-5 shrink-0 text-primary" />
+          <p className="min-w-0 flex-1 text-sm">
+            <span className="font-medium">Bạn được mời vào dự án này</span>
+            <span className="text-muted-foreground">
+              {' '}bởi {userById(state.users, myInvite.requestedBy)?.name ?? 'Ai đó'}
+              {myInvite.payload.expires_at ? ` · ${formatCountdown(myInvite.payload.expires_at, now)}` : ''}
+            </span>
+          </p>
+          <div className="flex shrink-0 gap-2">
+            <Button size="sm" disabled={inviteBusy} onClick={() => reviewInvite(true)}>
+              Chấp nhận
+            </Button>
+            <Button variant="outline" size="sm" disabled={inviteBusy} onClick={() => reviewInvite(false)}>
+              Từ chối
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -1090,6 +1140,34 @@ export function ProjectDetailPage() {
                       </span>
                       <span className="shrink-0 text-xs font-medium text-primary">Xem & duyệt</span>
                     </button>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+          {(isLeader || isAdmin) && pendingInvites.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Lời mời đang chờ ({pendingInvites.length})</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col divide-y p-0">
+                {pendingInvites.map((r) => {
+                  const invitee = userById(state.users, r.payload.invitee_id ?? '');
+                  const inviter = userById(state.users, r.requestedBy);
+                  return (
+                    <div key={r.id} className="flex items-center gap-3 p-4">
+                      <Avatar name={invitee?.name ?? '?'} avatarUrl={invitee?.avatarUrl} size="sm" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{invitee?.name ?? 'Ai đó'}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {inviter?.name ?? '—'} mời · {timeAgo(r.createdAt)}
+                          {r.payload.expires_at ? ` · ${formatCountdown(r.payload.expires_at, now)}` : ''}
+                        </span>
+                      </span>
+                      <Button variant="ghost" size="sm" onClick={() => cancelInvite(r.id)}>
+                        Hủy
+                      </Button>
+                    </div>
                   );
                 })}
               </CardContent>

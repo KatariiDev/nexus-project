@@ -87,6 +87,9 @@ export type Action =
   | { type: 'PROJECT_UPDATE'; project: Project }
   | { type: 'PROJECT_DELETE'; id: string }
   | { type: 'PROJECT_JOIN_REQUEST'; projectId: string }
+  | { type: 'PROJECT_INVITE_MEMBER'; projectId: string; inviteeIds: string[] }
+  | { type: 'PROJECT_INVITE_CANCEL'; id: string }
+  | { type: 'WORKSPACE_UPDATE_SETTINGS'; inviteExpiryDays: number }
   | { type: 'PROJECT_REQUEST_CREATE'; request: ProjectRequest }
   | { type: 'PROJECT_REQUEST_REVIEW'; id: string; approve: boolean; note?: string }
   | { type: 'TASK_ADD'; task: Task }
@@ -124,6 +127,7 @@ export type RichAction =
       task?: Task;
       project?: Project;
       request?: ProjectRequest;
+      requests?: ProjectRequest[];
       projectDeletedId?: string;
     })
   | { type: 'HYDRATE'; bundle: WorkspaceBundle; userId: string }
@@ -234,6 +238,21 @@ function reducer(state: AppState, action: RichAction): AppState {
       return action.request
         ? { ...state, projectRequests: [action.request, ...state.projectRequests] }
         : state;
+    case 'PROJECT_INVITE_MEMBER':
+      return action.requests
+        ? { ...state, projectRequests: [...action.requests, ...state.projectRequests] }
+        : state;
+    case 'PROJECT_INVITE_CANCEL':
+      return {
+        ...state,
+        projectRequests: state.projectRequests.filter((r) => r.id !== action.id),
+        activityLogs: withLog(state.activityLogs, action.log),
+      };
+    case 'WORKSPACE_UPDATE_SETTINGS':
+      return {
+        ...state,
+        workspace: { ...state.workspace, inviteExpiryDays: action.inviteExpiryDays },
+      };
     case 'PROJECT_REQUEST_REVIEW': {
       let projects = state.projects;
       if (action.project) {
@@ -781,6 +800,11 @@ function assertProjectMembership(state: AppState, action: Action): void {
     targetProjectId = task?.projectId;
   } else if (action.type === 'PROJECT_UPDATE') {
     targetProjectId = action.project.id;
+  } else if (action.type === 'PROJECT_INVITE_MEMBER') {
+    targetProjectId = action.projectId;
+  } else if (action.type === 'PROJECT_INVITE_CANCEL') {
+    const req = state.projectRequests.find((r) => r.id === action.id);
+    targetProjectId = req?.projectId;
   }
 
   if (!targetProjectId) return;
@@ -793,6 +817,11 @@ function assertProjectMembership(state: AppState, action: Action): void {
 
   if (action.type === 'PROJECT_UPDATE' && !isLeader) {
     throw new Error('Chỉ Admin hoặc Chủ dự án mới được chỉnh sửa dự án này.');
+  }
+
+  // Mời thành viên / hủy lời mời: chỉ Leader của dự án (Admin đã bypass ở đầu hàm).
+  if ((action.type === 'PROJECT_INVITE_MEMBER' || action.type === 'PROJECT_INVITE_CANCEL') && !isLeader) {
+    throw new Error('Chỉ Admin hoặc Chủ dự án mới được mời/hủy lời mời thành viên.');
   }
 
   // Tạo / xóa nhiệm vụ và thêm/gỡ nhiệm vụ phụ thuộc: chỉ Leader.
@@ -859,14 +888,20 @@ function assertProjectPermission(state: AppState, action: Action): void {
   const isSuperAdmin = me?.isSuperAdmin ?? false;
 
   // Duyệt / từ chối yêu cầu: Admin (hoặc Admin tổng) duyệt mọi loại yêu cầu;
-  // riêng đơn xin tham gia dự án (`join_project`) do Leader của dự án đó duyệt.
+  // riêng đơn xin tham gia dự án (`join_project`) do Leader của dự án đó duyệt,
+  // còn lời mời vào dự án (`invite_member`) do chính người được mời duyệt.
   if (action.type === 'PROJECT_REQUEST_REVIEW' && !canReviewProjectRequests(role, isSuperAdmin)) {
     const req = state.projectRequests.find((r) => r.id === action.id);
     const proj = req?.projectId ? state.projects.find((p) => p.id === req.projectId) : undefined;
     const isJoinLeader = req?.type === 'join_project' && proj?.managerId === state.currentUserId;
-    if (!isJoinLeader) {
+    const isInvitee = req?.type === 'invite_member' && req.payload.invitee_id === state.currentUserId;
+    if (!isJoinLeader && !isInvitee) {
       throw new Error('Chỉ Admin mới được duyệt yêu cầu.');
     }
+  }
+  // Cấu hình workspace (thời hạn lời mời): chỉ Admin.
+  if (action.type === 'WORKSPACE_UPDATE_SETTINGS' && !canDirectProjectAction(role, isSuperAdmin)) {
+    throw new Error('Chỉ Admin mới được đổi cấu hình.');
   }
   // Member gửi yêu cầu tạo dự án; yêu cầu tạm dừng/xóa (nếu còn) phải là Leader của dự án đó.
   if (action.type === 'PROJECT_REQUEST_CREATE') {
