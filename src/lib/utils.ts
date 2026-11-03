@@ -16,6 +16,11 @@ export function newId(): string {
   return crypto.randomUUID();
 }
 
+/** Khối lượng công việc từ số nhiệm vụ đang mở: 10 nhiệm vụ mở = 100%. */
+export function workloadFromOpenCount(openCount: number): number {
+  return Math.min(100, openCount * 10);
+}
+
 export function initials(name: string): string {
   return name
     .split(' ')

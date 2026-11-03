@@ -30,11 +30,12 @@ import { Badge, PriorityBadge, ProjectStatusBadge, TaskStatusBadge } from '../..
 import { Avatar } from '../../components/ui/avatar';
 import { Progress } from '../../components/ui/progress';
 import { EmptyState } from '../../components/ui/feedback';
+import { ColorDot, ProjectColorBar } from '../../components/ui/color-dot';
 import { dueLabel, greeting, isOverdue, timeAgo, todayLong } from '../../lib/format';
 import { TASK_STATUSES } from '../../types';
 import type { ActivityLog, TaskStatus } from '../../types';
 import { visibleProjects } from '../../lib/roles';
-import { cn } from '../../lib/utils';
+import { cn, workloadFromOpenCount } from '../../lib/utils';
 
 const PIE_COLORS: Record<TaskStatus, string> = {
   todo: '#94A3B8',
@@ -153,8 +154,7 @@ export function DashboardPage() {
   }, [state.activityLogs, state.tasks, state.comments, state.documents, visibleIds, user]);
 
   const topWorkload = useMemo(() => {
-    // Khối lượng chỉ tính từ nhiệm vụ trong dự án mình thấy (Admin thấy tất cả):
-    // 10 nhiệm vụ đang mở = 100%, giống cách tính workload ở lib/db.ts.
+    // Khối lượng chỉ tính từ nhiệm vụ trong dự án mình thấy (Admin thấy tất cả).
     // Member chỉ thấy các thành viên trong dự án mình đã tham gia.
     const isAdminLike = user.isSuperAdmin || user.role === 'admin';
     const openByUser = new Map<string, number>();
@@ -171,7 +171,7 @@ export function DashboardPage() {
     }
     return [...state.users]
       .filter((u) => u.status === 'active' && (isAdminLike || memberIds.has(u.id)))
-      .map((u) => ({ ...u, workload: Math.min(100, (openByUser.get(u.id) ?? 0) * 10) }))
+      .map((u) => ({ ...u, workload: workloadFromOpenCount(openByUser.get(u.id) ?? 0) }))
       .sort((a, b) => (b.workload ?? 0) - (a.workload ?? 0))
       .slice(0, 4);
   }, [state.users, visibleProjectsList, visibleTasks, user]);
@@ -257,7 +257,7 @@ export function DashboardPage() {
                   {statusDistribution.map((d) => (
                     <div key={d.name} className="flex items-center justify-between text-sm">
                       <span className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                        <ColorDot color={d.color} />
                         {d.name}
                       </span>
                       <span className="font-semibold">{d.value}</span>
@@ -298,7 +298,7 @@ export function DashboardPage() {
                 <button key={p.id} onClick={() => navigate(`/user/projects/${p.id}`)} className="rounded-lg p-3 text-left transition-colors hover:bg-accent/50">
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-2.5">
-                      <span className="h-8 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />
+                      <ProjectColorBar color={p.color} />
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium">{p.name}</span>
                         <span className="text-xs text-muted-foreground">{p.code}</span>

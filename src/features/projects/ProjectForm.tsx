@@ -10,10 +10,10 @@ import { useApp, useCurrentUser } from '../../store/AppContext';
 import { canDirectProjectAction } from '../../lib/roles';
 import { newId, cn } from '../../lib/utils';
 import { addDaysISO, toISODate } from '../../lib/format';
-import { PROJECT_STATUSES, PRIORITIES } from '../../types';
+import { PROJECT_STATUSES, PRIORITIES, DEFAULT_PROJECT_COLOR } from '../../types';
 import type { Priority, Project, ProjectStatus } from '../../types';
 
-const SWATCHES = ['#4F46E5', '#0284C7', '#16A34A', '#F59E0B', '#EF4444', '#A855F7'];
+const SWATCHES = [DEFAULT_PROJECT_COLOR, '#0284C7', '#16A34A', '#F59E0B', '#EF4444', '#A855F7'];
 
 interface ProjectFormProps {
   open: boolean;
@@ -134,7 +134,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
     return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
     const project: Project = {
       id: initial?.id ?? newId(),
@@ -154,14 +154,14 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
       updatedAt: new Date().toISOString(),
     };
     if (initial) {
-      dispatch({ type: 'PROJECT_UPDATE', project });
-      toast('Đã cập nhật dự án', project.name);
+      const ok = await dispatch({ type: 'PROJECT_UPDATE', project });
+      if (ok) toast('Đã cập nhật dự án', project.name);
     } else if (canDirect) {
-      dispatch({ type: 'PROJECT_ADD', project });
-      toast('Đã tạo dự án', `${project.code} · ${project.name}`);
+      const ok = await dispatch({ type: 'PROJECT_ADD', project });
+      if (ok) toast('Đã tạo dự án', `${project.code} · ${project.name}`);
     } else {
       // Member: gửi yêu cầu để Admin phê duyệt.
-      dispatch({
+      const ok = await dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
           id: newId(),
@@ -184,7 +184,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
           createdAt: new Date().toISOString(),
         },
       });
-      toast('Đã gửi yêu cầu tạo dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
+      if (ok) toast('Đã gửi yêu cầu tạo dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
     }
     onClose();
   };

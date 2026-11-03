@@ -27,7 +27,8 @@ import { Tabs } from '../../components/ui/tabs';
 import { Button } from '../../components/ui/button';
 import { Select } from '../../components/ui/input';
 import { Badge, TaskStatusBadge } from '../../components/ui/badge';
-import { TASK_STATUSES, priorityLabel } from '../../types';
+import { ColorDot } from '../../components/ui/color-dot';
+import { TASK_STATUSES, priorityLabel, DEFAULT_PROJECT_COLOR } from '../../types';
 import type { Priority, Task } from '../../types';
 import { cn } from '../../lib/utils';
 import { fmtDate } from '../../lib/format';
@@ -153,7 +154,7 @@ export function CalendarPage() {
           ev.kind === 'start' ? 'border border-dashed border-input text-muted-foreground' : priorityChip[t.priority],
         )}
       >
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: p?.color ?? '#4F46E5' }} />
+        <ColorDot color={p?.color ?? DEFAULT_PROJECT_COLOR} className="h-1.5 w-1.5" />
         <span className="truncate">
           {ev.kind === 'start' && <span className="mr-1 opacity-70">Bắt đầu:</span>}
           {t.title}

@@ -14,12 +14,12 @@ import { Input, Select, Textarea } from '../../components/ui/input';
 import { Avatar } from '../../components/ui/avatar';
 import { Checkbox } from '../../components/ui/controls';
 import { Progress } from '../../components/ui/progress';
+import { ColorDot } from '../../components/ui/color-dot';
 import { ConfirmDialog } from '../../components/ui/feedback';
 import { toast } from '../../components/ui/toast';
-import { dueLabel, fmtDate, fmtDateTime, timeAgo } from '../../lib/format';
+import { dueLabel, fmtDate, fmtDateTime, timeAgo, dateInputToISO, isoToDateInput } from '../../lib/format';
 import { cn, newId } from '../../lib/utils';
 import { canManageTaskForProject } from '../../lib/roles';
-import { dateInputToISO, isoToDateInput } from './helpers';
 
 const dueToneClass: Record<string, string> = {
   overdue: 'text-destructive',
@@ -140,20 +140,20 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
   const creatorName = userById(state.users, task.creatorId)?.name ?? '—';
   const declinerName = task.declinedBy ? userById(state.users, task.declinedBy)?.name ?? '—' : null;
 
-  const saveTitle = () => {
+  const saveTitle = async () => {
     const t = title.trim();
     if (t && t !== task.title) {
-      update({ title: t });
-      toast('Đã cập nhật tiêu đề');
+      const ok = await update({ title: t });
+      if (ok) toast('Đã cập nhật tiêu đề');
     } else {
       setTitle(task.title);
     }
   };
 
-  const saveDescription = () => {
+  const saveDescription = async () => {
     if (description !== task.description) {
-      update({ description });
-      toast('Đã lưu mô tả');
+      const ok = await update({ description });
+      if (ok) toast('Đã lưu mô tả');
     }
   };
 
@@ -189,25 +189,29 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
     setChecklistTitle('');
   };
 
-  const submitComment = () => {
+  const submitComment = async () => {
     const body = commentBody.trim();
     if (!body) return;
-    dispatch({ type: 'COMMENT_ADD', id: newId(), taskId: task.id, body });
-    setCommentBody('');
-    toast('Đã gửi bình luận');
+    const ok = await dispatch({ type: 'COMMENT_ADD', id: newId(), taskId: task.id, body });
+    if (ok) {
+      setCommentBody('');
+      toast('Đã gửi bình luận');
+    }
   };
 
-  const addDependency = (dependsOnId: string) => {
+  const addDependency = async (dependsOnId: string) => {
     if (!dependsOnId) return;
-    dispatch({ type: 'DEPENDENCY_ADD', id: newId(), taskId: task.id, dependsOnId });
-    const name = taskById(state.tasks, dependsOnId)?.title ?? '';
-    toast('Đã thêm nhiệm vụ phụ thuộc', name);
-    setDepValue('');
+    const ok = await dispatch({ type: 'DEPENDENCY_ADD', id: newId(), taskId: task.id, dependsOnId });
+    if (ok) {
+      const name = taskById(state.tasks, dependsOnId)?.title ?? '';
+      toast('Đã thêm nhiệm vụ phụ thuộc', name);
+      setDepValue('');
+    }
   };
 
-  const deleteTask = () => {
-    dispatch({ type: 'TASK_DELETE', id: task.id });
-    toast('Đã xóa nhiệm vụ', task.title);
+  const deleteTask = async () => {
+    const ok = await dispatch({ type: 'TASK_DELETE', id: task.id });
+    if (ok) toast('Đã xóa nhiệm vụ', task.title);
     setConfirmDelete(false);
     onClose();
   };
@@ -248,7 +252,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
           <TaskStatusBadge status={task.status} />
         )}
         {canEdit ? (
-          <Select value={task.priority} onChange={(e) => { update({ priority: e.target.value as Priority }); toast('Đã cập nhật mức ưu tiên'); }} className="w-auto" aria-label="Ưu tiên">
+          <Select value={task.priority} onChange={async (e) => { const ok = await update({ priority: e.target.value as Priority }); if (ok) toast('Đã cập nhật mức ưu tiên'); }} className="w-auto" aria-label="Ưu tiên">
             {PRIORITIES.map((p) => (
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
@@ -376,7 +380,7 @@ function TaskDrawerBody({ task, onClose }: { task: Task; onClose: () => void }) 
               if (!canEdit && !active) return null;
               const chip = (
                 <>
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color }} />
+                  <ColorDot color={l.color} />
                   {l.name}
                 </>
               );

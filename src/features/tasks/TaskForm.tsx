@@ -10,10 +10,12 @@ import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../components
 import { Field, Input, Select, Textarea } from '../../components/ui/input';
 import { Checkbox } from '../../components/ui/controls';
 import { Avatar } from '../../components/ui/avatar';
+import { ColorDot } from '../../components/ui/color-dot';
 import { toast } from '../../components/ui/toast';
 import { newId } from '../../lib/utils';
 import { visibleProjects } from '../../lib/roles';
-import { dateInputToISO, isoToDateInput, nextTaskCode } from './helpers';
+import { dateInputToISO, isoToDateInput } from '../../lib/format';
+import { nextTaskCode } from './helpers';
 
 const formSchema = z.object({
   title: z.string().min(3, 'Tiêu đề phải có ít nhất 3 ký tự'),
@@ -72,7 +74,7 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const onSubmit = (data: FormValues) => {
+  const onSubmit = async (data: FormValues) => {
     const project = projectById(state.projects, data.projectId);
     if (!project) {
       toast('Không tìm thấy dự án', 'Vui lòng chọn lại dự án', 'error');
@@ -89,7 +91,7 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
     const priority = data.priority ?? 'medium';
     const labelIds = data.labelIds ?? [];
     if (initial) {
-      dispatch({
+      const ok = await dispatch({
         type: 'TASK_UPDATE',
         task: {
           ...initial,
@@ -104,7 +106,7 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
           labelIds,
         },
       });
-      toast('Đã cập nhật nhiệm vụ', title);
+      if (ok) toast('Đã cập nhật nhiệm vụ', title);
     } else {
       const task: Task = {
         id: newId(),
@@ -123,8 +125,8 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
         createdAt: now,
         updatedAt: now,
       };
-      dispatch({ type: 'TASK_ADD', task });
-      toast('Đã tạo nhiệm vụ', `${task.code} · ${task.title}`);
+      const ok = await dispatch({ type: 'TASK_ADD', task });
+      if (ok) toast('Đã tạo nhiệm vụ', `${task.code} · ${task.title}`);
     }
     onClose();
   };
@@ -214,7 +216,7 @@ export function TaskForm({ open, onClose, initial, defaultProjectId }: {
                         onClick={() => field.onChange(active ? value.filter((x) => x !== l.id) : [...value, l.id])}
                         className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${active ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:bg-accent'}`}
                       >
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color }} />
+                        <ColorDot color={l.color} />
                         {l.name}
                       </button>
                     );

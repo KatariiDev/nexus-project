@@ -47,6 +47,25 @@ export function toISODate(d: Date): string {
   return format(d, "yyyy-MM-dd'T'HH:mm:ss");
 }
 
+/** '2026-10-11T00:00:00' -> '2026-10-11' (dùng cho input type="date"). */
+export function isoToDateInput(iso?: string | null): string {
+  if (!iso) return '';
+  return iso.slice(0, 10);
+}
+
+/** '2026-10-11' -> '2026-10-11T00:00:00' (rỗng -> undefined). */
+export function dateInputToISO(v: string): string | undefined {
+  return v ? `${v}T00:00:00` : undefined;
+}
+
+/** Định dạng kích thước file: 512 -> '512 B', 2048 -> '2 KB', 2.5MB -> '2.5 MB' (rỗng -> '—'). */
+export function formatBytes(bytes?: number | null): string {
+  if (bytes == null) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function addDaysISO(base: Date, days: number): string {
   const d = new Date(base);
   d.setDate(d.getDate() + days);
