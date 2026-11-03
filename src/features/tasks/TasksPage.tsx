@@ -65,10 +65,9 @@ function TaskCardContent({ task, dragHandle }: { task: Task; dragHandle?: ReactN
       </div>
       <p className="line-clamp-2 mt-1 text-sm font-medium leading-snug">{task.title}</p>
       {task.declinedBy && (
-        <p className="mt-1.5 flex items-center gap-1.5 text-xs text-destructive">
+        <div className="mt-1.5">
           <Badge tone="destructive">Đã từ chối</Badge>
-          {task.declinedReason && <span className="min-w-0 truncate">{task.declinedReason}</span>}
-        </p>
+        </div>
       )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <PriorityBadge priority={task.priority} />
@@ -381,9 +380,6 @@ function TaskTable({ tasks, onOpenTask, canManage }: { tasks: Task[]; onOpenTask
                       {t.declinedBy && <Badge tone="destructive">Đã từ chối</Badge>}
                     </p>
                     <p className="font-mono text-xs text-muted-foreground">{t.code}</p>
-                    {t.declinedBy && t.declinedReason && (
-                      <p className="text-xs text-destructive">Lý do: {t.declinedReason}</p>
-                    )}
                   </td>
                   <td className="p-3 text-muted-foreground">{project?.name ?? '—'}</td>
                   <td className="p-3">
