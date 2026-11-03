@@ -12,3 +12,13 @@ export function nextTaskCode(projectCode: string, tasks: Task[]): string {
   }
   return `${prefix}${String(max + 1).padStart(3, '0')}`;
 }
+
+/** Mau chu theo han chot cua nhiem vu — dung chung cho the kanban, bang va dong Cong viec cua toi. */
+export const dueToneClass: Record<string, string> = {
+  overdue: 'text-destructive',
+  today: 'text-warning',
+  tomorrow: 'text-sky-600 dark:text-sky-400',
+  soon: 'text-muted-foreground',
+  normal: 'text-muted-foreground',
+  done: 'text-success',
+};
