@@ -478,10 +478,6 @@ body.night .auth-divider::after {
   animation: owl-blink 4.8s ease-in-out infinite;
 }
 
-.email-owl.just-lit .owl-vector {
-  animation: owl-startle 650ms cubic-bezier(.2,.8,.2,1);
-}
-
 @keyframes owl-breathe {
   0%,100% { transform: translateY(0) scale(1); }
   50% { transform: translateY(-16px) scale(1.014,1.018); }
@@ -658,20 +654,6 @@ body.night .submit {
 
 body.night .submit::before {
   opacity: 1;
-}
-
-/* Notice for internal only */
-.internal-badge-row {
-  margin: 18px 0 0;
-  color: #425f6b;
-  font-size: 12px;
-  line-height: 1.5;
-  text-align: center;
-  transition: color var(--theme-duration) var(--theme-easing);
-}
-
-body.night .internal-badge-row {
-  color: #b1c7d4;
 }
 
 .status-msg {

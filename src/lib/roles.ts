@@ -15,8 +15,6 @@ import type { Project, User, WorkspaceRole } from '../types';
  * định trạng thái và duyệt nhiệm vụ của CHÍNH dự án mình làm chủ.
  */
 
-export const isAdmin = (role: WorkspaceRole): boolean => role === 'admin';
-
 /** Người dùng có phải là Leader (Chủ dự án) của dự án này không. */
 export const isProjectLeader = (project: Project, userId: string): boolean =>
   project.managerId === userId;
