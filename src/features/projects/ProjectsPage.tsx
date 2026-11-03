@@ -751,6 +751,50 @@ export function ProjectDetailPage() {
 
   const project = state.projects.find((p) => p.id === id);
 
+  // Các useMemo phải đặt TRƯỚC `if (!project) return ...` (Rules of Hooks):
+  // nếu dự án biến mất giữa chừng (bị xóa / sang id không tồn tại) mà số hooks
+  // thay đổi giữa các lần render thì React ném lỗi "Rendered more hooks...".
+  /** Đơn xin tham gia đang chờ duyệt của dự án này (người xin chưa phải thành viên). */
+  const joinRequests = useMemo(
+    () => {
+      if (!project) return [];
+      return state.projectRequests
+        .filter(
+          (r) =>
+            r.type === 'join_project' &&
+            r.projectId === project.id &&
+            r.status === 'pending' &&
+            !project.memberIds.includes(r.requestedBy),
+        )
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    },
+    [state.projectRequests, project],
+  );
+  /** Lời mời vào dự án này đang chờ mình chấp nhận/từ chối. */
+  const myInvite = useMemo(
+    () =>
+      project
+        ? state.projectRequests.find(
+            (r) =>
+              r.type === 'invite_member' &&
+              r.projectId === project.id &&
+              r.status === 'pending' &&
+              r.payload.invitee_id === me.id,
+          )
+        : undefined,
+    [state.projectRequests, project, me.id],
+  );
+  /** Lời mời vào dự án đang chờ xử lý (chỉ Leader/Admin thấy). */
+  const pendingInvites = useMemo(
+    () =>
+      project
+        ? state.projectRequests.filter(
+            (r) => r.type === 'invite_member' && r.projectId === project.id && r.status === 'pending',
+          )
+        : [],
+    [state.projectRequests, project],
+  );
+
   if (!project) {
     return (
       <div className="flex flex-col gap-4">
@@ -777,45 +821,11 @@ export function ProjectDetailPage() {
   const activities = state.activityLogs
     .filter((a) => a.entityType === 'project' && a.entityId === project.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  /** Đơn xin tham gia đang chờ duyệt của dự án này (người xin chưa phải thành viên). */
-  const joinRequests = useMemo(
-    () =>
-      state.projectRequests
-        .filter(
-          (r) =>
-            r.type === 'join_project' &&
-            r.projectId === project.id &&
-            r.status === 'pending' &&
-            !project.memberIds.includes(r.requestedBy),
-        )
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    [state.projectRequests, project.id, project.memberIds],
-  );
   /** Mình đã gửi đơn xin vào dự án này và đang chờ duyệt (tính từ đơn đã lưu). */
   const hasPendingJoin = joinRequests.some((r) => r.requestedBy === me.id);
-  /** Lời mời vào dự án này đang chờ mình chấp nhận/từ chối. */
-  const myInvite = useMemo(
-    () =>
-      state.projectRequests.find(
-        (r) =>
-          r.type === 'invite_member' &&
-          r.projectId === project.id &&
-          r.status === 'pending' &&
-          r.payload.invitee_id === me.id,
-      ),
-    [state.projectRequests, project.id, me.id],
-  );
   const myInviteExpired = myInvite?.payload.expires_at
     ? new Date(myInvite.payload.expires_at).getTime() <= now.getTime()
     : false;
-  /** Lời mời vào dự án đang chờ xử lý (chỉ Leader/Admin thấy). */
-  const pendingInvites = useMemo(
-    () =>
-      state.projectRequests.filter(
-        (r) => r.type === 'invite_member' && r.projectId === project.id && r.status === 'pending',
-      ),
-    [state.projectRequests, project.id],
-  );
   const archived = project.status === 'archived';
 
   const isLeader = isProjectLeader(project, me.id);
