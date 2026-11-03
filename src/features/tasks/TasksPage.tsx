@@ -17,6 +17,7 @@ import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../components
 import { Input, Select, Textarea } from '../../components/ui/input';
 import { Tabs } from '../../components/ui/tabs';
 import { AvatarStack } from '../../components/ui/avatar';
+import { ColorDot } from '../../components/ui/color-dot';
 import { Checkbox } from '../../components/ui/controls';
 import { Progress } from '../../components/ui/progress';
 import { ConfirmDialog, EmptyState, PageHeader } from '../../components/ui/feedback';
@@ -84,7 +85,7 @@ function TaskCardContent({ task, dragHandle }: { task: Task; dragHandle?: ReactN
         )}
         <div className="flex items-center gap-1.5">
           {labels.map((l) => (
-            <span key={l.id} title={l.name} className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color }} />
+            <ColorDot key={l.id} title={l.name} color={l.color} />
           ))}
           {items.length > 0 && (
             <span className="ml-1 text-xs text-muted-foreground">{doneCount}/{items.length}</span>
@@ -145,7 +146,7 @@ function QuickAdd({ status, projectId }: { status: TaskStatus; projectId?: strin
   const project = projectId ? projectById(state.projects, projectId) : undefined;
   if (!project) return null;
 
-  const submit = () => {
+  const submit = async () => {
     const title = value.trim();
     if (!title) return;
     const now = new Date().toISOString();
@@ -164,9 +165,11 @@ function QuickAdd({ status, projectId }: { status: TaskStatus; projectId?: strin
       createdAt: now,
       updatedAt: now,
     };
-    dispatch({ type: 'TASK_ADD', task });
-    toast('Đã tạo nhiệm vụ', `${task.code} · ${title}`);
-    setValue('');
+    const ok = await dispatch({ type: 'TASK_ADD', task });
+    if (ok) {
+      toast('Đã tạo nhiệm vụ', `${task.code} · ${title}`);
+      setValue('');
+    }
   };
 
   return (

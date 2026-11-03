@@ -12,6 +12,7 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Progress } from '../../components/ui/progress';
 import { Input, Field, Textarea } from '../../components/ui/input';
+import { ColorDot } from '../../components/ui/color-dot';
 import { Dialog, DialogHeader, DialogBody, DialogFooter } from '../../components/ui/dialog';
 import { Tabs } from '../../components/ui/tabs';
 import { Avatar } from '../../components/ui/avatar';
@@ -20,7 +21,7 @@ import { fmtDate, fmtDateTime, isOverdue, timeAgo } from '../../lib/format';
 import { cn } from '../../lib/utils';
 import { canAccessAdmin } from '../../lib/roles';
 import type { ProjectRequest, ProjectRequestStatus, ProjectStatus, TaskStatus } from '../../types';
-import { PROJECT_STATUSES, TASK_STATUSES, priorityLabel, projectRequestTypeLabel, projectStatusLabel } from '../../types';
+import { PROJECT_STATUSES, TASK_STATUSES, priorityLabel, projectRequestTypeLabel, projectStatusLabel, MAX_ACTIVITY_LOGS, DEFAULT_INVITE_EXPIRY_DAYS } from '../../types';
 
 const ADMIN_NAV = [
   { to: '/admin/overview', label: 'Tổng quan', icon: LayoutDashboard, end: true },
@@ -257,7 +258,7 @@ export function AdminOverviewPage() {
                   {projectStatusData.map((d) => (
                     <div key={d.name} className="flex items-center justify-between text-sm">
                       <span className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                        <ColorDot color={d.color} />
                         {d.name}
                       </span>
                       <span className="font-semibold">{d.value}</span>
@@ -292,7 +293,7 @@ export function AdminOverviewPage() {
                   {taskStatusData.map((d) => (
                     <div key={d.name} className="flex items-center justify-between text-sm">
                       <span className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                        <ColorDot color={d.color} />
                         {d.name}
                       </span>
                       <span className="font-semibold">{d.value}</span>
@@ -762,12 +763,12 @@ export function AdminLogsPage() {
         (l.entityName ?? '').toLowerCase().includes(kw) ||
         actor.includes(kw)
       );
-    }).slice(0, 200);
+    }).slice(0, MAX_ACTIVITY_LOGS);
   }, [state.activityLogs, state.users, q]);
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Nhật ký hoạt động" desc="Toàn bộ thao tác trong workspace (200 bản ghi gần nhất)" />
+      <PageHeader title="Nhật ký hoạt động" desc={`Toàn bộ thao tác trong workspace (${MAX_ACTIVITY_LOGS} bản ghi gần nhất)`} />
       <div className="max-w-sm">
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm theo người, hành động, tên..." />
       </div>
@@ -805,7 +806,7 @@ export function AdminLogsPage() {
 
 export function AdminSettingsPage() {
   const { state, dispatch } = useApp();
-  const [days, setDays] = useState(String(state.workspace.inviteExpiryDays ?? 3));
+  const [days, setDays] = useState(String(state.workspace.inviteExpiryDays ?? DEFAULT_INVITE_EXPIRY_DAYS));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 

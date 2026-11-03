@@ -161,6 +161,15 @@ export function projectRequestTypeLabel(t: ProjectRequestType): string {
   return PROJECT_REQUEST_TYPES.find((x) => x.value === t)?.label ?? t;
 }
 
+/** Số bản ghi hoạt động tối đa giữ lại trong log (dùng ở AppContext + trang Nhật ký admin). */
+export const MAX_ACTIVITY_LOGS = 200;
+
+/** Màu mặc định của dự án khi chưa chọn màu. */
+export const DEFAULT_PROJECT_COLOR = '#4F46E5';
+
+/** Số ngày hiệu lực mặc định của lời mời vào dự án mới. */
+export const DEFAULT_INVITE_EXPIRY_DAYS = 3;
+
 export interface ActivityLog {
   id: string;
   actorId: string;

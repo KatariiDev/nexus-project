@@ -12,14 +12,3 @@ export function nextTaskCode(projectCode: string, tasks: Task[]): string {
   }
   return `${prefix}${String(max + 1).padStart(3, '0')}`;
 }
-
-/** '2026-10-11T00:00:00' -> '2026-10-11' (dùng cho input type="date") */
-export function isoToDateInput(iso?: string | null): string {
-  if (!iso) return '';
-  return iso.slice(0, 10);
-}
-
-/** '2026-10-11' -> '2026-10-11T00:00:00' */
-export function dateInputToISO(v: string): string | undefined {
-  return v ? `${v}T00:00:00` : undefined;
-}

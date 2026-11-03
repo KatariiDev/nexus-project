@@ -29,6 +29,7 @@ import {
   persistProviderToken,
 } from '../features/auth/discordAuth';
 import { toast } from '../components/ui/toast';
+import { MAX_ACTIVITY_LOGS } from '../types';
 import {
   assignableRoles,
   canDirectProjectAction,
@@ -177,7 +178,7 @@ function emptyState(): AppState {
 }
 
 function withLog(logs: ActivityLog[], log?: ActivityLog): ActivityLog[] {
-  return log ? [log, ...logs].slice(0, 200) : logs;
+  return log ? [log, ...logs].slice(0, MAX_ACTIVITY_LOGS) : logs;
 }
 
 function reducer(state: AppState, action: RichAction): AppState {

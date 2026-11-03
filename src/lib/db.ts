@@ -25,9 +25,11 @@ import type {
   Workspace,
   WorkspaceRole,
 } from '../types';
-import type { Action, AppState } from '../store/AppContext';
+import type { Action, AppState, RichAction } from '../store/AppContext';
 import { getSupabase } from './supabase';
-import { newId } from './utils';
+import { newId, workloadFromOpenCount } from './utils';
+import { DEFAULT_INVITE_EXPIRY_DAYS, DEFAULT_PROJECT_COLOR } from '../types';
+import { dateInputToISO, formatBytes, isoToDateInput } from './format';
 
 type Sb = SupabaseClient;
 
@@ -93,10 +95,6 @@ interface DbTask {
 
 /* ================= Mapper DB -> App ================= */
 
-/** 'YYYY-MM-DD' -> 'YYYY-MM-DDT00:00:00' để khớp định dạng ngày app đang dùng. */
-const dateToApp = (d: string | null): string => (d ? `${d.slice(0, 10)}T00:00:00` : '');
-/** ISO datetime -> 'YYYY-MM-DD' (cho cột date) hoặc null. */
-const dateToDb = (iso?: string): string | null => (iso ? iso.slice(0, 10) : null);
 /** Chuỗi rỗng -> null (cho cột timestamptz). */
 const tsToDb = (iso?: string | null): string | null => (iso && iso.trim() !== '' ? iso : null);
 const num = (v: number | string | null | undefined): number | undefined =>
@@ -143,13 +141,13 @@ function mapProject(r: DbProject, memberIds: string[]): Project {
     description: r.description ?? '',
     status: r.status as Project['status'],
     priority: r.priority as Project['priority'],
-    startDate: dateToApp(r.start_date),
-    endDate: dateToApp(r.end_date),
+    startDate: dateInputToISO(r.start_date ?? '') ?? '',
+    endDate: dateInputToISO(r.end_date ?? '') ?? '',
     managerId: r.manager_id ?? '',
     memberIds,
     budget: num(r.budget),
     budgetUsed: num(r.budget_used) ?? 0,
-    color: r.color ?? '#4F46E5',
+    color: r.color ?? DEFAULT_PROJECT_COLOR,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -337,7 +335,7 @@ export async function loadWorkspaceData(
     const t = taskById.get(taskId);
     if (t && t.status !== 'done') for (const uid of ids) openCount.set(uid, (openCount.get(uid) ?? 0) + 1);
   }
-  for (const u of finalUsers) u.workload = Math.min(100, (openCount.get(u.id) ?? 0) * 10);
+  for (const u of finalUsers) u.workload = workloadFromOpenCount(openCount.get(u.id) ?? 0);
 
   return {
     workspace: { id: ws.id, name: ws.name, timezone: ws.timezone ?? 'Asia/Ho_Chi_Minh', inviteExpiryDays: ws.invite_expiry_days ?? undefined },
@@ -362,7 +360,7 @@ export async function loadWorkspaceData(
       .filter((a) => taskIds.has(a.task_id))
       .map((a) => ({
         id: a.id, taskId: a.task_id, name: a.name,
-        size: a.size_bytes ? formatBytes(a.size_bytes) : '—',
+        size: formatBytes(a.size_bytes),
         uploadedBy: a.uploaded_by, createdAt: a.created_at,
       })),
     notifications: ((notifsRes.data ?? []) as { id: string; user_id: string; kind: string; title: string; body: string; link: string | null; read: boolean; created_at: string }[])
@@ -403,12 +401,6 @@ export async function loadWorkspaceData(
         reviewedAt: r.reviewed_at ?? undefined,
       })),
   };
-}
-
-function formatBytes(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
-  return `${(b / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /* ================= Tài liệu dự án: upload file (bucket project-documents) ================= */
@@ -482,18 +474,6 @@ export interface PersistContext {
   /** Admin tổng: thao tác vượt ra ngoài workspace hiện tại (RLS cho phép). */
   isSuperAdmin: boolean;
 }
-
-/** Action sau khi làm giàu: reducer dùng thêm log/user/doc đã tạo. */
-export type RichAction = Action & {
-  log?: ActivityLog;
-  user?: User;
-  doc?: Document;
-  task?: Task;
-  project?: Project;
-  request?: ProjectRequest;
-  requests?: ProjectRequest[];
-  projectDeletedId?: string;
-};
 
 function buildLog(
   ctx: PersistContext,
@@ -687,8 +667,8 @@ function toProjectRow(p: Project, workspaceId: string) {
     description: p.description || '',
     status: p.status,
     priority: p.priority,
-    start_date: dateToDb(p.startDate),
-    end_date: dateToDb(p.endDate),
+    start_date: isoToDateInput(p.startDate) || null,
+    end_date: isoToDateInput(p.endDate) || null,
     manager_id: p.managerId || null,
     budget: p.budget ?? null,
     budget_used: p.budgetUsed ?? 0,
@@ -795,7 +775,7 @@ export async function persistAction(
     case 'PROJECT_INVITE_MEMBER': {
       const project = state.projects.find((p) => p.id === action.projectId);
       if (!project) throwDb(new Error('not found'), 'Không tìm thấy dự án.');
-      const expiryDays = state.workspace.inviteExpiryDays ?? 3;
+      const expiryDays = state.workspace.inviteExpiryDays ?? DEFAULT_INVITE_EXPIRY_DAYS;
       const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
       const now = new Date().toISOString();
       // Lọc bỏ người đã là thành viên hoặc đang có lời mời chờ xử lý.
@@ -906,7 +886,7 @@ export async function persistAction(
             ]),
           ),
           budget: typeof p.budget === 'number' ? p.budget : undefined,
-          color: String(p.color ?? '#4F46E5'),
+          color: String(p.color ?? DEFAULT_PROJECT_COLOR),
           createdAt: now,
           updatedAt: now,
         };

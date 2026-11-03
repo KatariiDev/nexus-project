@@ -2,6 +2,9 @@ import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 
 export const TARGET_DISCORD_GUILD_ID = import.meta.env.VITE_DISCORD_GUILD_ID as string | undefined;
 
+/** Thời gian cache kiểm tra Discord trong bộ nhớ (5 phút). */
+const DISCORD_CACHE_TTL_MS = 5 * 60 * 1000;
+
 export interface DiscordAuthResult {
   success: boolean;
   error?: string;
@@ -51,6 +54,23 @@ const guildCheckCache = new Map<string, { allowed: boolean; reason?: string; tim
 let inFlightVerification: Promise<{ allowed: boolean; reason?: string }> | null = null;
 
 /**
+ * Gọi Discord API, gặp HTTP 429 thì chờ `retry_after` rồi thử lại 1 lần.
+ * Trả về response của lần gọi đầu hoặc lần thử lại.
+ */
+async function fetchDiscordWith429Retry(url: string, init?: RequestInit): Promise<Response> {
+  let response = await fetch(url, init);
+  if (response.status === 429) {
+    const rateLimitData = await response.json().catch(() => ({}));
+    const retryAfterSec = Number(rateLimitData.retry_after || 2);
+    const waitMs = Math.min(Math.max(retryAfterSec * 1000, 1500), 4000);
+    console.warn(`Discord API 429: Chờ ${waitMs}ms trước khi thử lại...`);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    response = await fetch(url, init);
+  }
+  return response;
+}
+
+/**
  * Kiểm tra xem người dùng Discord có thuộc Server (Guild) nội bộ hay không.
  * Nếu có cài đặt VITE_DISCORD_GUILD_ID và người dùng không thuộc server đó,
  * hàm trả về false để hệ thống từ chối truy cập và đăng xuất tài khoản.
@@ -68,7 +88,7 @@ export async function verifyDiscordGuildMembership(providerToken?: string | null
 
   // 1. Kiểm tra cache trong bộ nhớ (5 phút)
   const cached = guildCheckCache.get(providerToken);
-  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+  if (cached && Date.now() - cached.timestamp < DISCORD_CACHE_TTL_MS) {
     return { allowed: cached.allowed, reason: cached.reason };
   }
 
@@ -89,26 +109,11 @@ export async function verifyDiscordGuildMembership(providerToken?: string | null
 
   inFlightVerification = (async () => {
     try {
-      let response = await fetch('https://discord.com/api/v10/users/@me/guilds', {
+      const response = await fetchDiscordWith429Retry('https://discord.com/api/v10/users/@me/guilds', {
         headers: {
           Authorization: `Bearer ${providerToken}`,
         },
       });
-
-      // Nếu gặp HTTP 429 (Rate limit), chờ retry_after và thử lại 1 lần
-      if (response.status === 429) {
-        const rateLimitData = await response.json().catch(() => ({}));
-        const retryAfterSec = Number(rateLimitData.retry_after || 2);
-        const waitMs = Math.min(Math.max(retryAfterSec * 1000, 1500), 4000);
-        console.warn(`Discord API 429: Chờ ${waitMs}ms trước khi thử lại...`);
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-
-        response = await fetch('https://discord.com/api/v10/users/@me/guilds', {
-          headers: {
-            Authorization: `Bearer ${providerToken}`,
-          },
-        });
-      }
 
       if (!response.ok) {
         const errBody = await response.text().catch(() => '');
@@ -247,7 +252,7 @@ export async function fetchDiscordGuildMember(
 
   // 1. Kiểm tra cache bộ nhớ (5 phút)
   const cached = memberCheckCache.get(`${guildId}_${token}`);
-  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+  if (cached && Date.now() - cached.timestamp < DISCORD_CACHE_TTL_MS) {
     return cached.member;
   }
 
@@ -258,26 +263,11 @@ export async function fetchDiscordGuildMember(
 
   inFlightMemberFetch = (async () => {
     try {
-      let response = await fetch(`https://discord.com/api/v10/users/@me/guilds/${guildId}/member`, {
+      const response = await fetchDiscordWith429Retry(`https://discord.com/api/v10/users/@me/guilds/${guildId}/member`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
-
-      // Nếu gặp HTTP 429, chờ retry_after và thử lại
-      if (response.status === 429) {
-        const rateLimitData = await response.json().catch(() => ({}));
-        const retryAfterSec = Number(rateLimitData.retry_after || 2);
-        const waitMs = Math.min(Math.max(retryAfterSec * 1000, 1500), 4000);
-        console.warn(`Discord API Member 429: Chờ ${waitMs}ms trước khi thử lại...`);
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-
-        response = await fetch(`https://discord.com/api/v10/users/@me/guilds/${guildId}/member`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      }
 
       if (!response.ok) {
         console.warn(
@@ -549,7 +539,7 @@ export async function fetchDiscordCurrentUser(providerToken?: string | null): Pr
   }
 
   const cached = currentUserCache.get(providerToken);
-  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+  if (cached && Date.now() - cached.timestamp < DISCORD_CACHE_TTL_MS) {
     return cached.user;
   }
 
@@ -559,24 +549,11 @@ export async function fetchDiscordCurrentUser(providerToken?: string | null): Pr
 
   inFlightCurrentUserFetch = (async () => {
     try {
-      let response = await fetch('https://discord.com/api/v10/users/@me', {
+      const response = await fetchDiscordWith429Retry('https://discord.com/api/v10/users/@me', {
         headers: {
           Authorization: `Bearer ${providerToken}`,
         },
       });
-
-      if (response.status === 429) {
-        const rateLimitData = await response.json().catch(() => ({}));
-        const retryAfterSec = Number(rateLimitData.retry_after || 2);
-        const waitMs = Math.min(Math.max(retryAfterSec * 1000, 1500), 4000);
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-
-        response = await fetch('https://discord.com/api/v10/users/@me', {
-          headers: {
-            Authorization: `Bearer ${providerToken}`,
-          },
-        });
-      }
 
       if (response.ok) {
         const data: DiscordCurrentUser = await response.json();

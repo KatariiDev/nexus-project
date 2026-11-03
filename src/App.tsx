@@ -17,19 +17,24 @@ import { NotificationsPage } from './features/notifications/NotificationsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { AdminShell, AdminOverviewPage, ApprovalsPage, AdminLogsPage, AdminSettingsPage, RequireAdmin } from './features/admin/AdminPages';
 
+/** Màn hình chờ chung khi app đang tải dữ liệu. */
+function LoadingScreen() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+        <Hexagon className="h-8 w-8 animate-pulse" />
+      </span>
+      <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
+    </div>
+  );
+}
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { state } = useApp();
   const location = useLocation();
 
   if (state.loading) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-          <Hexagon className="h-8 w-8 animate-pulse" />
-        </span>
-        <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (state.configError) {
@@ -116,14 +121,7 @@ function Landing() {
   const me = useCurrentUser();
 
   if (state.loading) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-          <Hexagon className="h-8 w-8 animate-pulse" />
-        </span>
-        <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
-      </div>
-    );
+    return <LoadingScreen />;
   }
   if (!state.authed) return <Navigate to="/login" replace />;
   return <Navigate to={canAccessAdmin(me.role, me.isSuperAdmin) ? '/admin' : '/user'} replace />;

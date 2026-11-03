@@ -41,9 +41,9 @@ export function TeamPage() {
     return map;
   }, [state.users, state.projects, state.tasks]);
 
-  const handleRoleChange = (user: User, role: WorkspaceRole) => {
-    dispatch({ type: 'USER_UPDATE_ROLE', id: user.id, role });
-    toast('Đã cập nhật vai trò', `${user.name} → ${roleLabel(role)}`);
+  const handleRoleChange = async (user: User, role: WorkspaceRole) => {
+    const ok = await dispatch({ type: 'USER_UPDATE_ROLE', id: user.id, role });
+    if (ok) toast('Đã cập nhật vai trò', `${user.name} → ${roleLabel(role)}`);
   };
 
   const [superBusy, setSuperBusy] = useState<string | null>(null);
