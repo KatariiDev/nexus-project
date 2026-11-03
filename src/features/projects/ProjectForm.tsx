@@ -10,10 +10,10 @@ import { useApp, useCurrentUser } from '../../store/AppContext';
 import { canDirectProjectAction } from '../../lib/roles';
 import { newId, cn } from '../../lib/utils';
 import { addDaysISO, toISODate } from '../../lib/format';
-import { PROJECT_STATUSES, PRIORITIES, DEFAULT_PROJECT_COLOR } from '../../types';
+import { PROJECT_STATUSES, PRIORITIES, projectStatusLabel } from '../../types';
 import type { Priority, Project, ProjectStatus } from '../../types';
 
-const SWATCHES = [DEFAULT_PROJECT_COLOR, '#0284C7', '#16A34A', '#F59E0B', '#EF4444', '#A855F7'];
+const SWATCHES = ['#4F46E5', '#0284C7', '#16A34A', '#F59E0B', '#EF4444', '#A855F7'];
 
 interface ProjectFormProps {
   open: boolean;
@@ -41,6 +41,26 @@ function toInputDate(iso: string): string {
   return iso ? iso.slice(0, 10) : '';
 }
 
+const PROJECT_CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+/** Sinh mã dự án dạng NEX-XXXXXX (6 ký tự chữ hoa + số ngẫu nhiên). */
+function randomProjectCode(): string {
+  let suffix = '';
+  for (let i = 0; i < 6; i++) {
+    suffix += PROJECT_CODE_ALPHABET[Math.floor(Math.random() * PROJECT_CODE_ALPHABET.length)];
+  }
+  return `NEX-${suffix}`;
+}
+
+/** Sinh mã chưa trùng với dự án nào khác (trừ dự án đang sửa, nếu có). */
+function uniqueProjectCode(projects: Project[], excludeId?: string): string {
+  let code = randomProjectCode();
+  while (projects.some((p) => p.code.toLowerCase() === code.toLowerCase() && p.id !== excludeId)) {
+    code = randomProjectCode();
+  }
+  return code;
+}
+
 export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
   const { state, dispatch } = useApp();
   const me = useCurrentUser();
@@ -49,8 +69,8 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
   const [errors, setErrors] = useState<Errors>({});
   const [memberQuery, setMemberQuery] = useState('');
 
-  // Chỉ Chủ dự án + Admin được đổi trạng thái (khi sửa); khi tạo mới thì chỉ Admin
-  // tạo trực tiếp mới chọn trạng thái, Member gửi yêu cầu luôn ở trạng thái "Lập kế hoạch".
+  // Chỉ Chủ dự án + Admin được đổi trạng thái khi sửa; khi tạo mới thì trạng thái
+  // luôn là "Lập kế hoạch", không cho chọn.
   const canChangeStatus = initial ? canDirect || initial.managerId === me.id : canDirect;
   // Member gửi yêu cầu tạo dự án thì Chủ dự án mặc định là chính mình.
   const managerLocked = !initial && !canDirect;
@@ -75,7 +95,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
           }
         : {
             name: '',
-            code: '',
+            code: uniqueProjectCode(state.projects),
             description: '',
             status: 'planning',
             priority: 'medium',
@@ -110,17 +130,22 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
     setErrors((e) => ({ ...e, managerId: undefined }));
   };
 
-  const validate = (): boolean => {
+  const validate = (code: string): boolean => {
     const e: Errors = {};
+    const today = toISODate(new Date()).slice(0, 10);
     if (!form.name.trim()) e.name = 'Vui lòng nhập tên dự án';
-    if (!form.code.trim()) {
+    if (!code.trim()) {
       e.code = 'Vui lòng nhập mã dự án';
     } else if (
-      state.projects.some((p) => p.code.toLowerCase() === form.code.trim().toLowerCase() && p.id !== initial?.id)
+      state.projects.some((p) => p.code.toLowerCase() === code.trim().toLowerCase() && p.id !== initial?.id)
     ) {
       e.code = 'Mã dự án đã tồn tại';
     }
     if (!form.managerId) e.managerId = 'Vui lòng chọn Chủ dự án';
+    // Chỉ khi tạo mới: ngày bắt đầu không được trước hôm nay.
+    if (!initial && form.startDate && form.startDate < today) {
+      e.startDate = 'Ngày bắt đầu phải từ hôm nay trở đi';
+    }
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       e.endDate = 'Ngày kết thúc phải từ ngày bắt đầu trở đi';
     }
@@ -134,11 +159,17 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
     return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = async () => {
-    if (!validate()) return;
+  const handleSubmit = () => {
+    // Mã tự sinh: nếu trùng với dự án khác (hiếm) thì sinh lại mã khác rồi mới kiểm tra.
+    let code = form.code;
+    if (!initial && state.projects.some((p) => p.code.toLowerCase() === code.trim().toLowerCase())) {
+      code = uniqueProjectCode(state.projects);
+      set('code', code);
+    }
+    if (!validate(code)) return;
     const project: Project = {
       id: initial?.id ?? newId(),
-      code: form.code.trim().toUpperCase(),
+      code: code.trim().toUpperCase(),
       name: form.name.trim(),
       description: form.description.trim(),
       status: form.status,
@@ -154,14 +185,14 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
       updatedAt: new Date().toISOString(),
     };
     if (initial) {
-      const ok = await dispatch({ type: 'PROJECT_UPDATE', project });
-      if (ok) toast('Đã cập nhật dự án', project.name);
+      dispatch({ type: 'PROJECT_UPDATE', project });
+      toast('Đã cập nhật dự án', project.name);
     } else if (canDirect) {
-      const ok = await dispatch({ type: 'PROJECT_ADD', project });
-      if (ok) toast('Đã tạo dự án', `${project.code} · ${project.name}`);
+      dispatch({ type: 'PROJECT_ADD', project });
+      toast('Đã tạo dự án', `${project.code} · ${project.name}`);
     } else {
       // Member: gửi yêu cầu để Admin phê duyệt.
-      const ok = await dispatch({
+      dispatch({
         type: 'PROJECT_REQUEST_CREATE',
         request: {
           id: newId(),
@@ -184,7 +215,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
           createdAt: new Date().toISOString(),
         },
       });
-      if (ok) toast('Đã gửi yêu cầu tạo dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
+      toast('Đã gửi yêu cầu tạo dự án', 'Admin sẽ phê duyệt trong trang Quản trị.');
     }
     onClose();
   };
@@ -202,7 +233,7 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Ví dụ: Nền tảng thương mại điện tử" />
           </Field>
           <Field label="Mã dự án *" error={errors.code}>
-            <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="Ví dụ: NEX-009" />
+            <Input value={form.code} readOnly title="Mã tự sinh, không chỉnh sửa được" />
           </Field>
         </div>
 
@@ -212,18 +243,22 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Trạng thái">
-            <Select
-              value={form.status}
-              onChange={(e) => set('status', e.target.value as ProjectStatus)}
-              disabled={!canChangeStatus}
-              title={canChangeStatus ? undefined : 'Chỉ Chủ dự án hoặc Admin mới được đổi trạng thái'}
-            >
-              {PROJECT_STATUSES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
+            {initial ? (
+              <Select
+                value={form.status}
+                onChange={(e) => set('status', e.target.value as ProjectStatus)}
+                disabled={!canChangeStatus}
+                title={canChangeStatus ? undefined : 'Chỉ Chủ dự án hoặc Admin mới được đổi trạng thái'}
+              >
+                {PROJECT_STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input readOnly value={projectStatusLabel('planning')} title="Dự án mới luôn bắt đầu ở trạng thái Lập kế hoạch" />
+            )}
           </Field>
           <Field label="Mức độ ưu tiên">
             <Select value={form.priority} onChange={(e) => set('priority', e.target.value as Priority)}>
@@ -240,11 +275,21 @@ export function ProjectForm({ open, onClose, initial }: ProjectFormProps) {
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Ngày bắt đầu">
-            <Input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} />
+          <Field label="Ngày bắt đầu" error={errors.startDate}>
+            <Input
+              type="date"
+              value={form.startDate}
+              min={initial ? undefined : toISODate(new Date()).slice(0, 10)}
+              onChange={(e) => set('startDate', e.target.value)}
+            />
           </Field>
           <Field label="Ngày kết thúc" error={errors.endDate}>
-            <Input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} />
+            <Input
+              type="date"
+              value={form.endDate}
+              min={form.startDate || undefined}
+              onChange={(e) => set('endDate', e.target.value)}
+            />
           </Field>
         </div>
 
