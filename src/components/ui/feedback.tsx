@@ -1,10 +1,5 @@
 import React from 'react';
-import { cn } from '../../lib/utils';
 import { Button } from './button';
-
-export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('animate-pulse rounded-md bg-muted', className)} {...props} />;
-}
 
 export function EmptyState({ icon, title, desc, action }: {
   icon: React.ReactNode; title: string; desc?: string; action?: React.ReactNode;

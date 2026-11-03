@@ -6,11 +6,6 @@ export function fmtDate(iso?: string | null): string {
   return format(new Date(iso), 'dd/MM/yyyy', { locale: vi });
 }
 
-export function fmtDateShort(iso?: string | null): string {
-  if (!iso) return '—';
-  return format(new Date(iso), 'dd/MM', { locale: vi });
-}
-
 export function fmtDateTime(iso?: string | null): string {
   if (!iso) return '—';
   return format(new Date(iso), 'HH:mm dd/MM/yyyy', { locale: vi });

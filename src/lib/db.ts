@@ -126,9 +126,10 @@ function mapUser(p: DbProfile, role: string): User {
 
 /**
  * Chuẩn hóa vai trò từ DB về 2 vai trò Admin / Member.
- * DB hiện tại vẫn có thể chứa giá trị cũ ('owner'/'manager'/'viewer'/'leader') vì
- * CHECK constraint chưa được migrate — các giá trị cũ đều về 'member'
- * (fail closed: không tự nâng quyền cho ai) cho tới khi user migrate DB.
+ * DB vẫn có thể chứa giá trị cũ ('owner'/'manager'/'viewer'/'leader') —
+ * các giá trị cũ đều về 'member' (fail closed: không tự nâng quyền cho ai).
+ * CHECK trên DB đã migrate về 2 giá trị từ 01/11/2026; hàm này giữ lại làm
+ * lưới an toàn phòng khi DB còn sót giá trị cũ.
  */
 export function normalizeRole(role: string): WorkspaceRole {
   if (role === 'admin' || role === 'member') return role;
